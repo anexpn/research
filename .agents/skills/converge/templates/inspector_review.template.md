@@ -2,6 +2,8 @@
 
 ## Round
 
+## Round Intent
+
 ## Standards consulted
 
 - `.agents/standards/quality_gate.md`
@@ -28,3 +30,22 @@
 - non_blocking_findings: 
 - unresolved_ambiguities: 
 - requires_goal_amendment: <true|false>
+
+## Criterion tokens
+
+- criterion_id: C1
+  - automated: <pass|fail|not_applicable>
+  - agent: <pass|fail|not_applicable>
+  - human: <pass|fail|not_applicable|pending>
+  - overall: <pass|fail|pending>
+- criterion_id: C2
+  - automated: <pass|fail|not_applicable>
+  - agent: <pass|fail|not_applicable>
+  - human: <pass|fail|not_applicable|pending>
+  - overall: <pass|fail|pending>
+
+## Intent checks
+
+- build_verification_artifacts: <pass|fail|not_applicable>
+- implement_solution: <pass|fail|not_applicable>
+- final_gate: <pass|fail|not_applicable>

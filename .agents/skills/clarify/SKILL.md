@@ -1,11 +1,11 @@
 ---
 name: clarify
-description: Converts vague user requests into an implementation-ready goal.md through an iterative clarification dialogue. Use when requirements are underspecified, success criteria are missing, constraints conflict, or non-goals are unclear.
+description: Converts vague user requests into implementation-ready goal and verification planning artifacts through iterative clarification. Use when requirements are underspecified, success criteria are missing, constraints conflict, or non-goals are unclear.
 ---
 
 # Clarify
 
-Use this skill to turn an ambiguous request into a precise `goal.md` for downstream implementation skills.
+Use this skill to turn an ambiguous request into precise planning artifacts for downstream implementation skills.
 
 ## When to use
 
@@ -18,13 +18,23 @@ Apply Clarify when at least one is true:
 
 ## Required outcome
 
-Produce a concise `goal.md` that contains:
+Produce:
+
+1. a concise `goal.md` that contains:
 
 - `Objective`
 - `Success Criteria` (verifiable with explicit verification type and evidence)
 - `Constraints` (concrete)
 - `Non-goals` (explicit boundaries)
 - `Max Rounds`
+
+2. a `verification_spec.md` that contains criterion-level verification intent (no test code yet):
+
+- BDD-like scenarios (`given/when/then`) in natural language
+- verification mode per criterion: `automated|agent|human|mixed`
+- expected evidence artifacts
+- gate timing (`per_round|final_only`)
+- human guidance requirements when human verification is involved
 
 Do not implement the feature in this skill.
 
@@ -39,10 +49,13 @@ Clarify Progress:
 - [ ] Integrate answers into a sharper draft
 - [ ] Validate objective/success/constraints/non-goals are complete
 - [ ] Ensure each success criterion has verification_type and expected_evidence
+- [ ] Draft criterion-level natural-language checks in verification_spec format
 - [ ] For subjective or taste-based criteria, define rubric and human verification evidence
 - [ ] Ask for explicit approval to finalize
 - [ ] Resolve session path from AGENTS.md
-- [ ] Write goal.md
+- [ ] Draft goal using templates/goal.template.md
+- [ ] Draft verification spec using templates/verification_spec.template.md
+- [ ] Write goal.md and verification_spec.md
 ```
 
 ### Step 1: Restate understanding
@@ -57,7 +70,7 @@ You must cover:
 
 - **Objective**: what should be true after completion?
 - **Success criteria**: what artifacts/checks prove done? what must stay green?
-- **Verification ownership**: which criteria are `automated`, `human`, or `mixed`?
+- **Verification ownership**: which criteria are `automated`, `agent`, `human`, or `mixed`?
 - **Human gate evidence**: if any criterion needs human judgment, what evidence and approver identity are required?
 - **Constraints**: performance, dependency, style, platform, security/safety limits.
 - **Non-goals**: what must not be changed in this task?
@@ -89,9 +102,9 @@ If criteria remain vague after targeted questions, convert vagueness into explic
 
 ### Step 4: Require explicit approval
 
-Before writing files, ask:
+Before writing files, use `AskQuestion` tool to ask:
 
-`Do you approve this goal draft? (approve/request changes)`
+`Do you approve this goal and verification draft? (approve/request changes)`
 
 Only proceed on explicit `approve`.
 
@@ -102,56 +115,27 @@ Read `AGENTS.md` to resolve session conventions before writing.
 Write:
 
 `<resolved-session-folder>/goal.md`
+`<resolved-session-folder>/verification_spec.md`
 
 If `AGENTS.md` does not define enough path/naming detail, ask the user before creating folders.
 If the target session folder does not exist, create it using the resolved convention.
 
 ## goal.md template
 
-Use this structure:
+Use `templates/goal.template.md` as the default starting point.
 
-```markdown
-# Goal
+Use `templates/verification_spec.template.md` for criterion-level verification intent.
 
-## Objective
-<One immutable objective statement>
+You may adapt the wording, add criteria, or add sections, but do not remove required fields from "Required outcome".
 
-## Success Criteria
-- [ ] id: C1
-  - criterion: <Testable statement>
-  - verification_type: <automated|human|mixed>
-  - expected_evidence: <test output, artifact path, or reviewer sign-off>
-  - rubric: <required when criterion is subjective or human-judged; else none>
-- [ ] id: C2
-  - criterion: <Testable statement>
-  - verification_type: <automated|human|mixed>
-  - expected_evidence: <test output, artifact path, or reviewer sign-off>
-  - rubric: <required when criterion is subjective or human-judged; else none>
-
-## Constraints
-- <Performance, style, dependency, safety, runtime constraints>
-
-## Non-goals
-- <Explicitly excluded work>
-
-## Max Rounds
-3
-```
-
-When any criterion has `verification_type: human` (or `mixed` with human sign-off), add:
-
-```markdown
-## Human Verification
-- required: true
-- approver_role: <requester|reviewer|domain expert>
-- evidence_format: <artifact links, screenshots, checklist, notes>
-```
+When no human-gated criterion exists, set Human Verification fields to `none`/`false` rather than deleting the section.
 
 ## Quality gates before writing
 
 - No unresolved placeholders.
 - Success criteria are testable and observable.
 - Every success criterion has `verification_type` and `expected_evidence`.
+- `verification_spec.md` maps every criterion id in `goal.md`.
 - Subjective criteria have an explicit rubric (not only "looks good" or "similar enough").
 - Human-gated criteria define approver role and evidence format.
 - Constraints are concrete enough to guide trade-offs.
@@ -164,6 +148,12 @@ To reduce low-value inspector loops in downstream Converge runs:
 - Avoid unbounded taste-language in criteria; pair qualitative intent with concrete checks.
 - If a criterion cannot be fully formalized, document the exact human decision gate up front.
 - Write criteria so Inspector can produce actionable deltas instead of repeating ambiguity notes.
+
+## Utility files
+
+- Templates:
+  - `templates/goal.template.md`
+  - `templates/verification_spec.template.md`
 
 ## Interaction style
 

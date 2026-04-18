@@ -10,6 +10,11 @@
 - role: <reviewer|requester|domain expert>
 - timestamp:
 
+## Guidance used
+
+- guidance_path:
+- guidance_version_or_commit:
+
 ## Criteria Verified
 
 - criterion_id: 

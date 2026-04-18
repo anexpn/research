@@ -2,13 +2,24 @@
 
 ## Round
 
+## Round Intent
 
-
-status: <COMPLETE|CONTINUE|AWAITING_HUMAN>
+status: <COMPLETE|CONTINUE|READY_FOR_HUMAN>
 blocker_detected: <true|false>
 primary_unmet_criterion: 
 human_verification_required: <true|false>
 human_verification_evidence: <path(s) or none>
+
+## Orchestration summary
+
+- builder_inputs:
+- inspector_scope:
+
+## Round memory
+
+- strengths_to_preserve:
+- regressions_detected:
+- next_priority_deltas:
 
 ## Accepted findings
 
@@ -20,12 +31,12 @@ human_verification_evidence: <path(s) or none>
 
 ## Decision rationale
 
-
-
 ## Loop control rationale
 
 - 
+
 - 
+
 - 
 
 ## Delta instructions
@@ -39,5 +50,5 @@ human_verification_evidence: <path(s) or none>
 
 ## Human gate check
 
-- : <satisfied|pending>
-- Evidence: 
+- human_gate_status: <satisfied|pending>
+- Evidence:

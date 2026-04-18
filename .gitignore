@@ -1,1 +1,3 @@
 .DS_Store
+.complexipy_cache
+**/__pycache__
