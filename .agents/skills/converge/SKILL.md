@@ -18,10 +18,17 @@ Use Converge when at least one is true:
 
 ## Role model
 
-- **Conductor**: creates session folders, enforces loop rules, stops on blockers, and stops at max rounds.
+- **Conductor**: creates session folders, enforces loop rules, launches role sub-agents, and stops on terminal states.
 - **Builder**: implements changes and produces execution evidence.
 - **Inspector**: checks Builder output against standards with evidence for each critique.
 - **Judge**: resolves Builder vs Inspector using evidence and emits next-step delta.
+
+## Conductor boundaries (non-negotiable)
+
+1. Conductor is orchestration-only and must never perform Builder, Inspector, or Judge work directly.
+2. Conductor must launch sub-agents for every Builder, Inspector, and Judge step in every round.
+3. If a required sub-agent cannot be launched or completed, Conductor must stop with `BLOCKED`; it must not substitute by doing the role itself.
+4. Conductor may run only orchestration helpers (for example, session/round setup scripts) and artifact routing tasks.
 
 ## Required file protocol
 
@@ -60,6 +67,9 @@ Use this logical layout:
 3. **Evidence first**: Builder and Inspector claims must include concrete evidence (test output, log snippets, diff references, or standards links).
 4. **Judge must justify overruling**: if Inspector is overruled, Judge writes explicit reasoning and evidence.
 5. **Round cap**: default max is `3` rounds unless user overrides.
+6. **Human verification gate**: if any success criterion uses `verification_type: human` (or `mixed` with required human sign-off), `status: COMPLETE` is invalid until human evidence is recorded.
+7. **Awaiting human is terminal for loop automation**: when human-gated criteria lack required evidence, Judge must emit `status: AWAITING_HUMAN` and Conductor must pause instead of continuing automated rounds.
+8. **No placeholder evidence**: round artifacts must use concrete commands and artifact paths; placeholders like `<script here>` invalidate the round and require correction before the next role runs.
 
 ## Conductor workflow
 
@@ -70,10 +80,12 @@ Converge Progress:
 - [ ] Read AGENTS.md and extract conventions
 - [ ] Resolve session root and report naming
 - [ ] Validate pre-existing goal.md has required fields
+- [ ] Validate each success criterion includes verification type and expected evidence
 - [ ] Run round 1 using sub-agents (Builder -> Inspector -> Judge)
 - [ ] Evaluate Judge status
-- [ ] Continue rounds until COMPLETE, blocker, or max rounds
-- [ ] Emit final summary for human handoff or completion
+- [ ] If status is AWAITING_HUMAN, pause and request human verification evidence
+- [ ] Continue rounds until COMPLETE, blocker, awaiting human, or max rounds
+- [ ] Emit final summary for handoff or completion
 ```
 
 ### Step 1: Initialize session
@@ -84,6 +96,7 @@ Validate `goal.md` includes at least:
 
 - objective
 - explicit success criteria
+- for each criterion: `verification_type` (`automated|human|mixed`) and expected evidence
 - constraints (if any)
 - max rounds (or use default `3` if omitted)
 
@@ -132,9 +145,17 @@ Judge returns/writes the round's `judge_resolution.md`.
 After each round:
 
 1. If `blocker_detected: true`, stop and report blocker.
-2. If `status: COMPLETE`, stop and report verified completion.
-3. If rounds reached max (`3`) and not complete, stop with graceful failure and handoff notes.
-4. Else create next round and continue.
+2. If `status: AWAITING_HUMAN`, stop automated looping and request human verification evidence before any next round.
+3. If `status: COMPLETE`, stop and report verified completion.
+4. If rounds reached max (`3`) and not complete, stop with graceful failure and handoff notes.
+5. Else create next round and continue.
+
+### Decision semantics (must stay consistent across templates and prompts)
+
+- `status: CONTINUE`: criteria are not yet met, but the next action is still automatable via Builder.
+- `status: AWAITING_HUMAN`: at least one human-gated criterion is still pending evidence; automation pauses for explicit human verification.
+- `status: COMPLETE`: all criteria are satisfied and required evidence exists, including human evidence for any human-gated criteria.
+- `blocker_detected: true`: hard external blocker or unsafe/indeterminate condition that prevents reliable continuation.
 
 ## Utility files
 
@@ -143,6 +164,7 @@ After each round:
   - `templates/builder_report.template.md`
   - `templates/inspector_review.template.md`
   - `templates/judge_resolution.template.md`
+  - `templates/human_verification.template.md`
 - Role prompts:
   - `prompts/builder_system_prompt.md`
   - `prompts/inspector_system_prompt.md`
@@ -155,6 +177,7 @@ After each round:
 
 At the end, Conductor must produce one concise result:
 
-- Final status: `COMPLETE`, `BLOCKED`, or `MAX_ROUNDS_REACHED`
+- Final status: `COMPLETE`, `BLOCKED`, `AWAITING_HUMAN`, or `MAX_ROUNDS_REACHED`
 - Evidence summary (tests, checks, or blocker proof)
 - Remaining risks and exact next action (if not complete)
+

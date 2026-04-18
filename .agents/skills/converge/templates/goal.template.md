@@ -1,17 +1,28 @@
 # Goal
 
 ## Objective
-<One immutable objective statement>
+
+
 
 ## Success Criteria
-- [ ] <Criterion 1: testable>
-- [ ] <Criterion 2: testable>
+
+- id: C1
+  - criterion: 
+  - verification_type: <automated|human|mixed>
+  - expected_evidence: <test command output, artifact path, or reviewer sign-off>
+- id: C2
+  - criterion: 
+  - verification_type: <automated|human|mixed>
+  - expected_evidence: <test command output, artifact path, or reviewer sign-off>
 
 ## Constraints
+
 - <Performance, style, dependency, or safety constraints>
 
 ## Non-goals
-- <What this session should not change>
+
+- 
 
 ## Max Rounds
+
 3

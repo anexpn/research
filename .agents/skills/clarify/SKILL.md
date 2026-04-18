@@ -21,9 +21,10 @@ Apply Clarify when at least one is true:
 Produce a concise `goal.md` that contains:
 
 - `Objective`
-- `Success Criteria` (verifiable)
+- `Success Criteria` (verifiable with explicit verification type and evidence)
 - `Constraints` (concrete)
 - `Non-goals` (explicit boundaries)
+- `Max Rounds`
 
 Do not implement the feature in this skill.
 
@@ -37,6 +38,8 @@ Clarify Progress:
 - [ ] Ask one focused clarification question at a time (prefer AskQuestion tool)
 - [ ] Integrate answers into a sharper draft
 - [ ] Validate objective/success/constraints/non-goals are complete
+- [ ] Ensure each success criterion has verification_type and expected_evidence
+- [ ] For subjective or taste-based criteria, define rubric and human verification evidence
 - [ ] Ask for explicit approval to finalize
 - [ ] Resolve session path from AGENTS.md
 - [ ] Write goal.md
@@ -54,6 +57,8 @@ You must cover:
 
 - **Objective**: what should be true after completion?
 - **Success criteria**: what artifacts/checks prove done? what must stay green?
+- **Verification ownership**: which criteria are `automated`, `human`, or `mixed`?
+- **Human gate evidence**: if any criterion needs human judgment, what evidence and approver identity are required?
 - **Constraints**: performance, dependency, style, platform, security/safety limits.
 - **Non-goals**: what must not be changed in this task?
 
@@ -75,6 +80,12 @@ Repeat:
 3. integrate answers.
 
 Stop when all required fields are specific enough to guide implementation, or when the user asks to finalize with documented uncertainty.
+
+If criteria remain vague after targeted questions, convert vagueness into explicit artifacts in `goal.md`:
+
+- a measurable proxy check, or
+- a written rubric for human evaluation, and
+- a named follow-up clarification item.
 
 ### Step 4: Require explicit approval
 
@@ -106,8 +117,16 @@ Use this structure:
 <One immutable objective statement>
 
 ## Success Criteria
-- [ ] <Criterion 1: testable>
-- [ ] <Criterion 2: testable>
+- [ ] id: C1
+  - criterion: <Testable statement>
+  - verification_type: <automated|human|mixed>
+  - expected_evidence: <test output, artifact path, or reviewer sign-off>
+  - rubric: <required when criterion is subjective or human-judged; else none>
+- [ ] id: C2
+  - criterion: <Testable statement>
+  - verification_type: <automated|human|mixed>
+  - expected_evidence: <test output, artifact path, or reviewer sign-off>
+  - rubric: <required when criterion is subjective or human-judged; else none>
 
 ## Constraints
 - <Performance, style, dependency, safety, runtime constraints>
@@ -119,12 +138,32 @@ Use this structure:
 3
 ```
 
+When any criterion has `verification_type: human` (or `mixed` with human sign-off), add:
+
+```markdown
+## Human Verification
+- required: true
+- approver_role: <requester|reviewer|domain expert>
+- evidence_format: <artifact links, screenshots, checklist, notes>
+```
+
 ## Quality gates before writing
 
 - No unresolved placeholders.
 - Success criteria are testable and observable.
+- Every success criterion has `verification_type` and `expected_evidence`.
+- Subjective criteria have an explicit rubric (not only "looks good" or "similar enough").
+- Human-gated criteria define approver role and evidence format.
 - Constraints are concrete enough to guide trade-offs.
 - Non-goals are explicit and prevent scope creep.
+
+## Converge handoff compatibility
+
+To reduce low-value inspector loops in downstream Converge runs:
+
+- Avoid unbounded taste-language in criteria; pair qualitative intent with concrete checks.
+- If a criterion cannot be fully formalized, document the exact human decision gate up front.
+- Write criteria so Inspector can produce actionable deltas instead of repeating ambiguity notes.
 
 ## Interaction style
 

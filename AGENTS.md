@@ -4,6 +4,5 @@
 
 ### Paths
 
-- `<NNN>-<slug>`: all materials about a research idea.
-- `docs/ai/sessions`: session folder for ai agent conversation, create new one in the format of `<NNN>-<slug>`
+- `<NNN>-<slug>`: session folder with all materials about a research idea.
 
