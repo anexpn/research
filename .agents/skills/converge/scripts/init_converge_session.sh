@@ -30,8 +30,9 @@ if [[ ! -f "${SESSION_DIR}/goal.md" ]]; then
 ## Non-goals
 - <fill this>
 
-## Max Rounds
-3
+## Round Limits
+- max_implementation_rounds: 3
+- max_verification_rounds: 2
 EOF
 fi
 

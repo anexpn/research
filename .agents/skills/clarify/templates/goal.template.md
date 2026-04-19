@@ -30,9 +30,10 @@
 
 - 
 
-## Max Rounds
+## Round Limits
 
-3
+- max_implementation_rounds: 3
+- max_verification_rounds: 2
 
 ## Human Verification
 

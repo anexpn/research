@@ -26,7 +26,9 @@ Produce:
 - `Success Criteria` (verifiable with explicit verification type and evidence)
 - `Constraints` (concrete)
 - `Non-goals` (explicit boundaries)
-- `Max Rounds`
+- `Round Limits`:
+  - `max_implementation_rounds`
+  - `max_verification_rounds`
 
 2. a `verification_spec.md` that contains criterion-level verification intent (no test code yet):
 
@@ -48,6 +50,7 @@ Clarify Progress:
 - [ ] Ask one focused clarification question at a time (prefer AskQuestion tool)
 - [ ] Integrate answers into a sharper draft
 - [ ] Validate objective/success/constraints/non-goals are complete
+- [ ] Validate round limits include separate implementation and verification caps
 - [ ] Ensure each success criterion has verification_type and expected_evidence
 - [ ] Draft criterion-level natural-language checks in verification_spec format
 - [ ] For subjective or taste-based criteria, define rubric and human verification evidence
@@ -136,6 +139,7 @@ When no human-gated criterion exists, set Human Verification fields to `none`/`f
 - Success criteria are testable and observable.
 - Every success criterion has `verification_type` and `expected_evidence`.
 - `verification_spec.md` maps every criterion id in `goal.md`.
+- `goal.md` defines both `max_implementation_rounds` and `max_verification_rounds` as positive integers.
 - Subjective criteria have an explicit rubric (not only "looks good" or "similar enough").
 - Human-gated criteria define approver role and evidence format.
 - Constraints are concrete enough to guide trade-offs.

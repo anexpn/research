@@ -86,7 +86,10 @@ Use this logical layout:
 5. **Artifact copy requirement**: when verification generates external artifacts, copy them into the current `round_<n>/evidence/` folder and cite copied paths in reports.
 6. **Artifact provenance**: for each copied artifact, record original source path and copied evidence path.
 7. **Judge must justify overruling**: if Inspector is overruled, Judge writes explicit reasoning and evidence.
-8. **Round cap**: use `max rounds` from `goal.md` for this session.
+8. **Round caps**: use separate limits from `goal.md`:
+   - `max_verification_rounds` applies to rounds with `round_intent: build_verification_artifacts`.
+   - `max_implementation_rounds` applies to rounds with `round_intent: implement_solution`.
+   - `final_gate` rounds do not consume either cap unless `goal.md` explicitly says otherwise.
 9. **No placeholder evidence**: concrete commands and artifact paths are required; placeholders invalidate the round.
 10. **Source-of-truth tokens only**: criterion status must be parsed from explicit token fields in canonical files, never inferred from prose.
 11. **Human verification timing default**: `final_only` unless `goal.md` or `verification_spec.md` says otherwise.
@@ -104,7 +107,7 @@ Converge Progress:
 - [ ] Launch Judge for round 1
 - [ ] Evaluate Judge status
 - [ ] If status is READY_FOR_HUMAN, request human verification evidence
-- [ ] Continue rounds until COMPLETE, BLOCKED, READY_FOR_HUMAN, or configured max rounds
+- [ ] Continue rounds until COMPLETE, BLOCKED, READY_FOR_HUMAN, or either configured round cap is reached
 - [ ] Emit final summary for handoff or completion
 ```
 
@@ -122,10 +125,11 @@ Validate `goal.md` includes at least:
 - explicit success criteria
 - for each criterion: `verification_type` (`automated|agent|human|mixed`) and expected evidence
 - constraints (if any)
-- max rounds
+- `max_implementation_rounds`
+- `max_verification_rounds`
 
 If `verification_spec.md` exists, validate it maps each criterion to intended checks.
-If `max rounds` is missing, stop and ask user to clarify instead of inferring.
+If either round cap is missing, stop and ask user to clarify instead of inferring.
 If key fields are missing, stop and ask user to clarify instead of inferring.
 
 Optional helper for creating session folders only (does not define the goal):
@@ -197,7 +201,7 @@ After each round:
 2. If `status: READY_FOR_HUMAN`, stop automated looping and request human verification evidence.
 3. If required human evidence is provided and valid, finalize as `COMPLETE`.
 4. If `status: COMPLETE` (no pending human gate), stop and report verified completion.
-5. If rounds reached configured max rounds and not complete, stop with `MAX_ROUNDS_REACHED` and handoff notes.
+5. If either configured round cap is reached and not complete, stop with `MAX_ROUNDS_REACHED` and include which cap was exhausted plus remaining open criteria.
 6. Else create next round and continue.
 
 ### Decision semantics (must stay consistent across templates and prompts)
@@ -227,5 +231,6 @@ After each round:
 At the end, Conductor must produce one concise result:
 
 - Final status: `COMPLETE`, `BLOCKED`, `READY_FOR_HUMAN`, or `MAX_ROUNDS_REACHED`
+- If max reached: identify `implementation` or `verification` cap exhaustion explicitly
 - Evidence summary (tests, checks, prompts, human sign-off, or blocker proof)
 - Remaining risks and exact next action (if not complete)

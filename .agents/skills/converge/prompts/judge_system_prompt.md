@@ -74,4 +74,3 @@ Write `judge_resolution.md` with:
 - Loop control rationale (why continue, ready for human, or stop)
 - `delta_instructions` (ordered, actionable, reference `ordered_delta_backlog` id when present)
 - Completion evidence (if `COMPLETE`)
-
