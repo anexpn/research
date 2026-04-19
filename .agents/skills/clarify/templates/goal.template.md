@@ -10,11 +10,13 @@
   - criterion: 
   - verification_type: <automated|agent|human|mixed>
   - expected_evidence: <test output, artifact path, or reviewer sign-off>
+  - closure_signal: <what explicit signal marks this criterion closed; e.g., exact metric/threshold/report decision/sign-off field>
   - rubric: <required when criterion is subjective or human-judged; else none>
 - id: C2
   - criterion: 
   - verification_type: <automated|agent|human|mixed>
   - expected_evidence: <test output, artifact path, or reviewer sign-off>
+  - closure_signal: <what explicit signal marks this criterion closed; e.g., exact metric/threshold/report decision/sign-off field>
   - rubric: <required when criterion is subjective or human-judged; else none>
 
 ## Verification Spec Reference

@@ -4,5 +4,5 @@
 
 ### Paths
 
-- `<NNN>-<slug>`: session folder with all materials about a research idea.
-
+- `<NNN>-<slug>/`: root folder of a research idea.
+- `<NNN>--<slug>/sessions/<NNN>-<slug>/`: AI session folder.

@@ -34,6 +34,7 @@ Produce:
 
 - BDD-like scenarios (`given/when/then`) in natural language
 - verification mode per criterion: `automated|agent|human|mixed`
+- for automated scenarios: explicit measurable pass conditions (comparator + threshold/tolerance/value)
 - expected evidence artifacts
 - gate timing (`per_round|final_only`)
 - human guidance requirements when human verification is involved
@@ -53,6 +54,7 @@ Clarify Progress:
 - [ ] Validate round limits include separate implementation and verification caps
 - [ ] Ensure each success criterion has verification_type and expected_evidence
 - [ ] Draft criterion-level natural-language checks in verification_spec format
+- [ ] For automated criteria, define scenario-level assertion contracts (not only feature presence)
 - [ ] For subjective or taste-based criteria, define rubric and human verification evidence
 - [ ] Ask for explicit approval to finalize
 - [ ] Resolve session path from AGENTS.md
@@ -73,6 +75,7 @@ You must cover:
 
 - **Objective**: what should be true after completion?
 - **Success criteria**: what artifacts/checks prove done? what must stay green?
+- **Automated assertion contract** (for each automated criterion): what exact behavior must fail on regression, and what numeric/bounded condition proves pass?
 - **Verification ownership**: which criteria are `automated`, `agent`, `human`, or `mixed`?
 - **Human gate evidence**: if any criterion needs human judgment, what evidence and approver identity are required?
 - **Constraints**: performance, dependency, style, platform, security/safety limits.
@@ -86,6 +89,16 @@ Questioning method:
 4. If the tool is unavailable, ask conversationally, still one question at a time.
 
 If the user is unsure, propose concrete options and ask them to confirm/reject/edit.
+
+For automated criteria, ask toward executable precision:
+
+- fixed fixture/input values to test,
+- required output metric/property,
+- oracle ownership (test-owned oracle/fixture vs implementation-provided helper),
+- comparison operator (`==`, `<=`, `>=`, `within epsilon`, ordering),
+- exact threshold/tolerance,
+- determinism requirement (seed, stable scene, stable command),
+- at least one regression trap (negative or contrasting case).
 
 ### Step 3: Iterate until clear enough
 
@@ -102,6 +115,11 @@ If criteria remain vague after targeted questions, convert vagueness into explic
 - a measurable proxy check, or
 - a written rubric for human evaluation, and
 - a named follow-up clarification item.
+
+If an "automated" criterion cannot be expressed with falsifiable pass/fail conditions, do one of:
+
+- downgrade that criterion to `agent` or `human` with an explicit rubric, or
+- keep as `automated` only after adding measurable proxy checks and documenting limitations.
 
 ### Step 4: Require explicit approval
 
@@ -140,6 +158,9 @@ When no human-gated criterion exists, set Human Verification fields to `none`/`f
 - Every success criterion has `verification_type` and `expected_evidence`.
 - `verification_spec.md` maps every criterion id in `goal.md`.
 - `goal.md` defines both `max_implementation_rounds` and `max_verification_rounds` as positive integers.
+- Every automated scenario includes at least one measurable pass condition (value, bound, tolerance, ordering, or deterministic artifact property).
+- No automated scenario pass condition is only "no crash", "symbol exists", or "result is not None".
+- At least one automated scenario per criterion includes a regression-sensitive assertion (negative/contrast/baseline comparison).
 - Subjective criteria have an explicit rubric (not only "looks good" or "similar enough").
 - Human-gated criteria define approver role and evidence format.
 - Constraints are concrete enough to guide trade-offs.

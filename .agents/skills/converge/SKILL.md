@@ -27,9 +27,10 @@ Use Converge when at least one is true:
 
 1. Conductor is orchestration-only and must never perform Builder, Inspector, or Judge work directly.
 2. Conductor launches one Judge sub-agent per round; Judge manages Builder and Inspector for that round.
-3. If a required sub-agent cannot be launched or completed, stop with `BLOCKED`; no role substitution.
-4. Conductor may run only orchestration helpers (for example, session/round setup scripts) and artifact routing tasks.
-5. Conductor must enforce source-of-truth token parsing rules from canonical round files.
+3. Conductor is the only role that may start another round or launch another Judge.
+4. If a required sub-agent cannot be launched or completed, stop with `BLOCKED`; no role substitution.
+5. Conductor may run only orchestration helpers (for example, session/round setup scripts) and artifact routing tasks.
+6. Conductor must enforce source-of-truth token parsing rules from canonical round files.
 
 ## Required file protocol
 
@@ -63,7 +64,16 @@ Use this logical layout:
     ...
 ```
 
-`round_<n>/evidence/` stores copied verification artifacts produced during that round (for example rendered images, exported logs, screenshots, profiling output, or generated reports). Round files must reference artifact paths inside this folder, not only original source paths.
+`round_<n>/evidence/` is the canonical storage location for round evidence artifacts (for example rendered images, exported logs, screenshots, profiling output, or generated reports).
+
+`round_<n>/` root should contain only canonical round documents:
+
+- `builder_report.md`
+- `inspector_review.md`
+- `judge_resolution.md`
+- `evidence/`
+
+Do not keep duplicate evidence files in both `round_<n>/` and `round_<n>/evidence/`. If a command emits artifacts outside `evidence/`, move them into `evidence/` and cite the canonical evidence path.
 
 `verification_spec.md` is recommended and should define criterion-level verification intent for:
 
@@ -81,18 +91,22 @@ Use this logical layout:
    - Add these when useful (recommended, not mandatory):
      - `locked_scope`, `do_not_touch`, `accepted_evidence_reuse`, `invalidated_evidence`, `risk_watchlist`, `environment_notes`
 2. **One loop type**: every round uses the same Judge-led flow (Judge plans -> Builder executes -> Inspector verifies -> Judge resolves); only round intent changes.
-3. **Intent-driven rounds**: Judge sets `round_intent` explicitly (for example `build_verification_artifacts`, `implement_solution`, `final_gate`).
-4. **Evidence first**: Builder and Inspector claims must include concrete evidence (test output, log snippets, diff references, artifact paths).
-5. **Artifact copy requirement**: when verification generates external artifacts, copy them into the current `round_<n>/evidence/` folder and cite copied paths in reports.
-6. **Artifact provenance**: for each copied artifact, record original source path and copied evidence path.
-7. **Judge must justify overruling**: if Inspector is overruled, Judge writes explicit reasoning and evidence.
-8. **Round caps**: use separate limits from `goal.md`:
+3. **Judge is single-round only**: Judge must orchestrate exactly one round and then stop. Judge must never launch another Judge, create a new round folder, or run multi-round loops.
+4. **Intent-driven rounds**: Judge sets `round_intent` explicitly (for example `build_verification_artifacts`, `implement_solution`, `final_gate`).
+5. **Evidence first**: Builder and Inspector claims must include concrete evidence (test output, log snippets, diff references, artifact paths).
+6. **Canonical artifact location**: generated round artifacts must be written directly to `round_<n>/evidence/` when possible; otherwise move them there and remove redundant copies.
+7. **Selective evidence snapshotting**: copy stable source artifacts (tests/prompts/checklists/specs) into round evidence only when they changed this round or are otherwise required for immutable audit snapshots.
+8. **Artifact provenance**: for each moved or copied artifact, record original source path and canonical evidence path.
+9. **Judge must justify overruling**: if Inspector is overruled, Judge writes explicit reasoning and evidence.
+10. **Verification strength standard**: apply `standards/verification_strength.md` for verification-spec quality, automated assertion strength, and enforcement expectations.
+11. **Automated assertion strength bar**: tests must satisfy the behavioral assertion requirements in `standards/verification_strength.md`; symbol-presence or non-`None` checks alone are insufficient unless explicitly justified.
+12. **Round caps**: use separate limits from `goal.md`:
    - `max_verification_rounds` applies to rounds with `round_intent: build_verification_artifacts`.
    - `max_implementation_rounds` applies to rounds with `round_intent: implement_solution`.
    - `final_gate` rounds do not consume either cap unless `goal.md` explicitly says otherwise.
-9. **No placeholder evidence**: concrete commands and artifact paths are required; placeholders invalidate the round.
-10. **Source-of-truth tokens only**: criterion status must be parsed from explicit token fields in canonical files, never inferred from prose.
-11. **Human verification timing default**: `final_only` unless `goal.md` or `verification_spec.md` says otherwise.
+13. **No placeholder evidence**: concrete commands and artifact paths are required; placeholders invalidate the round.
+14. **Source-of-truth tokens only**: criterion status must be parsed from explicit token fields in canonical files, never inferred from prose.
+15. **Human verification timing default**: `final_only` unless `goal.md` or `verification_spec.md` says otherwise.
 
 ## Conductor workflow
 
@@ -129,6 +143,7 @@ Validate `goal.md` includes at least:
 - `max_verification_rounds`
 
 If `verification_spec.md` exists, validate it maps each criterion to intended checks.
+Validation must also enforce `standards/verification_strength.md` so each automated scenario has explicit, measurable pass/fail expectations.
 If either round cap is missing, stop and ask user to clarify instead of inferring.
 If key fields are missing, stop and ask user to clarify instead of inferring.
 
@@ -158,6 +173,8 @@ Judge responsibilities for every round:
 6. resolve status in `judge_resolution.md`,
 7. update round memory inside `judge_resolution.md` (locked strengths, detected regressions, and next priority deltas).
 
+Judge must stop after writing the current round's `judge_resolution.md`. Starting additional rounds is Conductor-only.
+
 Judge-to-next-Builder handoff guideline:
 
 - Judge should make next-round Builder input executable without re-deriving intent from prose.
@@ -175,7 +192,7 @@ For `round_intent: build_verification_artifacts`:
   - agent checks: prompt artifacts and expected output schema/rubric,
   - human checks: guidance text/checklist for human sign-off.
 - Inspector verifies artifact quality and criterion coverage.
-- Builder copies produced verification artifacts into `round_<n>/evidence/` and records source->copied path mappings.
+- Builder writes produced verification artifacts directly into `round_<n>/evidence/` when possible, and records source->canonical path mappings.
 
 Within `round_intent: build_verification_artifacts`, Inspector must also enforce the red baseline:
 
@@ -185,7 +202,7 @@ Within `round_intent: build_verification_artifacts`, Inspector must also enforce
 For `round_intent: implement_solution`:
 
 - Builder implements product changes and updates evidence.
-- Builder copies newly produced verification artifacts into `round_<n>/evidence/`.
+- Builder keeps newly produced verification artifacts canonically in `round_<n>/evidence/` (no duplicate same-name files in round root).
 - Inspector confirms criteria closure and non-regression.
 
 For `round_intent: final_gate`:
@@ -213,6 +230,8 @@ After each round:
 
 ## Utility files
 
+- Standards:
+  - `standards/verification_strength.md`
 - Templates:
   - `templates/builder_report.template.md`
   - `templates/inspector_review.template.md`

@@ -6,6 +6,7 @@
 
 ## Standards consulted
 
+- `standards/verification_strength.md`
 - `.agents/standards/quality_gate.md`
 - `.agents/standards/reference_good/...`
 - `.agents/standards/reference_bad/...`
@@ -37,7 +38,13 @@
 - missing_or_unverifiable_artifacts:
   - <artifact expected in round evidence folder but missing/unreadable>
 - provenance_mismatches:
-  - <source path / copied path mismatch or unclear mapping>
+  - <source path / canonical evidence path mismatch or unclear mapping>
+
+## Automated assertion audit
+
+- assertion_strength: <pass|fail|not_applicable>
+- weak_assertion_scenarios:
+  - <scenario id/path and why assertion is too weak, or none>
 
 ## Criterion tokens
 

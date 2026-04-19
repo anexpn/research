@@ -10,6 +10,7 @@ Implement the Judge delta for this round intent by the shortest reliable path wi
 
 - `goal.md`
 - `verification_spec.md` (if provided)
+- `standards/verification_strength.md`
 - current round intent and delta from Judge
 - previous `judge_resolution.md` (if provided)
 - VCS workspace state (tracked/untracked changes, diffs, branch context, commit history as needed)
@@ -27,16 +28,19 @@ Implement the Judge delta for this round intent by the shortest reliable path wi
 3. Run concrete verification commands for changed behavior.
 4. Include raw evidence (test output, command output, error logs).
 5. Treat automated tests as code deliverables; do not downgrade test quality to make the round pass.
-6. When verification produces artifacts (for example images, logs, screenshots, profiles, reports), copy them into `round_<n>/evidence/` and keep deterministic filenames.
-7. Record artifact provenance as `source_path -> copied_round_evidence_path`.
-8. If blocked by environment, dependencies, missing permissions, or missing requirements, set `blocker_detected: true` and stop.
-9. Do not claim success without execution evidence.
-10. Treat the Judge carry-forward bundle as the default plan for this round:
+6. When verification produces artifacts (for example images, logs, screenshots, profiles, reports), write them directly into `round_<n>/evidence/` whenever possible and keep deterministic filenames.
+7. If a tool emits artifacts outside `round_<n>/evidence/`, move them into `round_<n>/evidence/` and avoid leaving duplicate same-name files in `round_<n>/`.
+8. Record artifact provenance as `source_path -> canonical_round_evidence_path`.
+9. Copy stable source artifacts (tests/prompts/checklists/specs) into round evidence only when changed this round or explicitly required for immutable audit snapshots.
+10. If blocked by environment, dependencies, missing permissions, or missing requirements, set `blocker_detected: true` and stop.
+11. Do not claim success without execution evidence.
+12. Treat the Judge carry-forward bundle as the default plan for this round:
   - follow `ordered_delta_backlog` and `open_criteria` first,
   - apply `do_not_touch` and `locked_scope` only when explicitly populated,
   - prefer `accepted_evidence_reuse` and refresh `invalidated_evidence` when those fields are provided,
   - if `needs_user_clarification` is non-empty, avoid guessing; report partial progress and surface the question.
-11. If you deviate from the carry-forward plan, keep scope tight and explain why in `builder_report.md`.
+13. If you deviate from the carry-forward plan, keep scope tight and explain why in `builder_report.md`.
+14. For automated verification artifacts, follow `standards/verification_strength.md` and avoid assertion-light smoke checks.
 
 ## Required output
 
@@ -52,10 +56,13 @@ Write `builder_report.md` using this structure:
   - automated checks (tests/scripts)
   - agent-check prompts
   - human-check guidance
-- Evidence artifacts copied into round folder:
+- Evidence artifacts in canonical round folder:
   - source path
-  - copied path in `round_<n>/evidence/`
+  - canonical path in `round_<n>/evidence/`
   - purpose (which criterion/check it supports)
+- Stable source artifacts intentionally referenced in place (not snapshotted this round)
+- Duplicate files outside evidence (must be `none` after remediation)
+- Assertion-strength notes for automated scenarios (why each scenario meaningfully fails on regression)
 - Status:
   - `objective_progress: met|partial|not_met`
   - `blocker_detected: true|false`

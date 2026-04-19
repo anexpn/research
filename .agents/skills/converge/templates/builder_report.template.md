@@ -30,16 +30,22 @@
 - human_checks:
   - <guidance/checklist path(s) created/updated, or none>
 
-## Evidence artifacts copied to round folder
+## Evidence artifacts (canonical in round folder)
 
 - evidence_dir: `<round_path>/evidence/`
 - artifacts:
   - source_path: `<original generated artifact path>`
-  copied_path: `<round_path>/evidence/<artifact-name>`
+  canonical_path: `<round_path>/evidence/<artifact-name>`
   criterion_or_check: `<criterion id or check name>`
   - source_path: `<original generated artifact path>`
-  copied_path: `<round_path>/evidence/<artifact-name>`
+  canonical_path: `<round_path>/evidence/<artifact-name>`
   criterion_or_check: `<criterion id or check name>`
+- stable_source_artifacts_not_snapshotted:
+  - `<unchanged test/prompt/checklist/spec paths intentionally referenced in-place, or none>`
+- duplicate_files_outside_evidence:
+  - `<none OR file names found in both round root and evidence with remediation>`
+- assertion_strength_notes:
+  - `<scenario/check id -> meaningful assertion used (threshold/tolerance/comparator/etc)>`
 
 ## Commands executed
 

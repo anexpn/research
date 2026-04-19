@@ -14,14 +14,18 @@ human_verification_evidence: <path(s) or none>
 
 - builder_inputs:
 - inspector_scope:
+- single_round_attestation: <judge confirms this resolution covers exactly one round and stops here>
+- automated_assertion_quality_summary: <pass/fail highlights from inspector assertion audit>
 
 ## Evidence artifact routing
 
 - evidence_dir: `<round_path>/evidence/`
-- copied_artifacts:
-  - <artifact copied path and purpose>
-- missing_copies:
-  - <artifact that should have been copied but was not>
+- canonical_artifacts:
+  - <artifact canonical path and purpose>
+- missing_or_misplaced_artifacts:
+  - <artifact expected in evidence folder but missing/misplaced>
+- duplicate_files_outside_evidence:
+  - <same-name files present in both round root and evidence, or none>
 
 ## Round memory
 
