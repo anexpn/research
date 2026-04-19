@@ -39,3 +39,6 @@ fi
 echo "Created session: ${SESSION_DIR}"
 echo "Created round: ${SESSION_DIR}/round_1"
 echo "Created run dir: ${SESSION_DIR}/round_1/run"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${SCRIPT_DIR}/scaffold_round.sh" "${SESSION_DIR}/round_1"

@@ -2,8 +2,6 @@
 
 ## Objective
 
-
-
 ## Success Criteria
 
 - id: C1

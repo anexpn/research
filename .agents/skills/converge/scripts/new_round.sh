@@ -32,3 +32,6 @@ fi
 mkdir -p "${NEXT_DIR}/run"
 echo "Created: ${NEXT_DIR}"
 echo "Created: ${NEXT_DIR}/run"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${SCRIPT_DIR}/scaffold_round.sh" "${NEXT_DIR}"
