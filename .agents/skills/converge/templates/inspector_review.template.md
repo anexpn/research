@@ -7,9 +7,7 @@
 ## Standards consulted
 
 - `standards/verification_strength.md`
-- `.agents/standards/quality_gate.md`
-- `.agents/standards/reference_good/...`
-- `.agents/standards/reference_bad/...`
+- `<project-specific standards from AGENTS.md or none>`
 
 ## Findings
 
@@ -36,9 +34,9 @@
 
 - artifact_copy_compliance: <pass|fail>
 - missing_or_unverifiable_artifacts:
-  - <artifact expected in round evidence folder but missing/unreadable>
+  - <artifact expected in round run folder but missing/unreadable>
 - provenance_mismatches:
-  - <source path / canonical evidence path mismatch or unclear mapping>
+  - <source path / canonical run path mismatch or unclear mapping>
 
 ## Automated assertion audit
 

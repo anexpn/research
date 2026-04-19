@@ -29,6 +29,6 @@ if [[ -d "${NEXT_DIR}" ]]; then
   exit 1
 fi
 
-mkdir -p "${NEXT_DIR}/evidence"
+mkdir -p "${NEXT_DIR}/run"
 echo "Created: ${NEXT_DIR}"
-echo "Created: ${NEXT_DIR}/evidence"
+echo "Created: ${NEXT_DIR}/run"

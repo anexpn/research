@@ -20,11 +20,11 @@
 - criterion_id: 
   - verdict: <pass|fail>
   - notes: <what was checked and why it passes/fails>
-  - evidence_links: <prefer `round_<n>/evidence/` artifact path(s), screenshot(s), or command output reference>
+  - evidence_links: <prefer `round_<n>/run/` artifact path(s), screenshot(s), or command output reference>
 - criterion_id: 
   - verdict: <pass|fail>
   - notes: <what was checked and why it passes/fails>
-  - evidence_links: <prefer `round_<n>/evidence/` artifact path(s), screenshot(s), or command output reference>
+  - evidence_links: <prefer `round_<n>/run/` artifact path(s), screenshot(s), or command output reference>
 
 ## Approval
 

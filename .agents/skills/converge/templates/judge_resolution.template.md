@@ -19,13 +19,13 @@ human_verification_evidence: <path(s) or none>
 
 ## Evidence artifact routing
 
-- evidence_dir: `<round_path>/evidence/`
+- run_dir: `<round_path>/run/`
 - canonical_artifacts:
   - <artifact canonical path and purpose>
 - missing_or_misplaced_artifacts:
-  - <artifact expected in evidence folder but missing/misplaced>
-- duplicate_files_outside_evidence:
-  - <same-name files present in both round root and evidence, or none>
+  - <artifact expected in run folder but missing/misplaced>
+- duplicate_files_outside_run:
+  - <same-name files present in both round root and run, or none>
 
 ## Round memory
 

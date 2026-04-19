@@ -12,7 +12,7 @@ TIMESTAMP="$(date +"%Y%m%d-%H%M%S")"
 SESSION_ID="${TIMESTAMP}-${TASK_SLUG}"
 SESSION_DIR="${SESSIONS_ROOT}/${SESSION_ID}"
 
-mkdir -p "${SESSION_DIR}/round_1/evidence"
+mkdir -p "${SESSION_DIR}/round_1/run"
 
 if [[ ! -f "${SESSION_DIR}/goal.md" ]]; then
   cat > "${SESSION_DIR}/goal.md" <<'EOF'
@@ -38,4 +38,4 @@ fi
 
 echo "Created session: ${SESSION_DIR}"
 echo "Created round: ${SESSION_DIR}/round_1"
-echo "Created evidence dir: ${SESSION_DIR}/round_1/evidence"
+echo "Created run dir: ${SESSION_DIR}/round_1/run"

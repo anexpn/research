@@ -24,26 +24,30 @@
 ## Verification artifacts
 
 - automated_checks:
-  - <test or script path(s) created/updated, or none>
+  - <stable project test/script path(s) created/updated, or none>
 - agent_checks:
-  - <prompt/spec path(s) created/updated, or none>
+  - <stable project prompt/spec path(s) created/updated, or none>
 - human_checks:
-  - <guidance/checklist path(s) created/updated, or none>
+  - <stable project guidance/checklist path(s) created/updated, or none>
 
 ## Evidence artifacts (canonical in round folder)
 
-- evidence_dir: `<round_path>/evidence/`
+- run_dir: `<round_path>/run/`
 - artifacts:
   - source_path: `<original generated artifact path>`
-  canonical_path: `<round_path>/evidence/<artifact-name>`
+  canonical_path: `<round_path>/run/<artifact-name>`
   criterion_or_check: `<criterion id or check name>`
   - source_path: `<original generated artifact path>`
-  canonical_path: `<round_path>/evidence/<artifact-name>`
+  canonical_path: `<round_path>/run/<artifact-name>`
   criterion_or_check: `<criterion id or check name>`
 - stable_source_artifacts_not_snapshotted:
   - `<unchanged test/prompt/checklist/spec paths intentionally referenced in-place, or none>`
-- duplicate_files_outside_evidence:
-  - `<none OR file names found in both round root and evidence with remediation>`
+- source_artifact_snapshots_in_run:
+  - source_path: `<stable project artifact path>`
+  canonical_path: `<round_path>/run/<snapshot-path>`
+  reason: `<changed_this_round|immutable_audit|required_by_policy>`
+- duplicate_files_outside_run:
+  - `<none OR file names found in both round root and run with remediation>`
 - assertion_strength_notes:
   - `<scenario/check id -> meaningful assertion used (threshold/tolerance/comparator/etc)>`
 

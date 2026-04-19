@@ -59,27 +59,36 @@ Use this logical layout:
     builder_report.md
     inspector_review.md
     judge_resolution.md
-    evidence/
+    run/
   round_2/
     ...
 ```
 
-`round_<n>/evidence/` is the canonical storage location for round evidence artifacts (for example rendered images, exported logs, screenshots, profiling output, or generated reports).
+`round_<n>/run/` is the canonical storage location for runtime outputs (for example output files, exported logs, screenshots, profiling output, and generated reports). Primary implementation artifacts (for example tests/scripts/prompts/checklists used by the actual project) should live in normal project paths, not only in `run/`.
 
 `round_<n>/` root should contain only canonical round documents:
 
 - `builder_report.md`
 - `inspector_review.md`
 - `judge_resolution.md`
-- `evidence/`
+- `run/`
 
-Do not keep duplicate evidence files in both `round_<n>/` and `round_<n>/evidence/`. If a command emits artifacts outside `evidence/`, move them into `evidence/` and cite the canonical evidence path.
+Do not keep duplicate runtime outputs in both `round_<n>/` and `round_<n>/run/`. If a command emits artifacts outside `run/`, move them into `run/` and cite the canonical run path.
 
 `verification_spec.md` is recommended and should define criterion-level verification intent for:
 
 - automated checks (tests/scripts),
 - agent checks (prompted multimodal/text evaluation),
 - human checks (guidance/checklist and sign-off expectations).
+
+### Code artifacts vs evidence artifacts
+
+- Verification code is real work. Automated checks (tests/scripts), agent prompt specs, and human checklists should be created/maintained in stable project locations.
+- `round_<n>/run/` is for execution outputs and audit snapshots.
+- Snapshot copies of stable source artifacts into `run/` are optional and should be done only when changed this round or required for immutable audit history.
+- Reports should distinguish:
+  - `source_artifact_path` (real project path),
+  - `run_artifact_path` (runtime output or snapshot under `round_<n>/run/`).
 
 ## Operational guardrails
 
@@ -94,9 +103,9 @@ Do not keep duplicate evidence files in both `round_<n>/` and `round_<n>/evidenc
 3. **Judge is single-round only**: Judge must orchestrate exactly one round and then stop. Judge must never launch another Judge, create a new round folder, or run multi-round loops.
 4. **Intent-driven rounds**: Judge sets `round_intent` explicitly (for example `build_verification_artifacts`, `implement_solution`, `final_gate`).
 5. **Evidence first**: Builder and Inspector claims must include concrete evidence (test output, log snippets, diff references, artifact paths).
-6. **Canonical artifact location**: generated round artifacts must be written directly to `round_<n>/evidence/` when possible; otherwise move them there and remove redundant copies.
-7. **Selective evidence snapshotting**: copy stable source artifacts (tests/prompts/checklists/specs) into round evidence only when they changed this round or are otherwise required for immutable audit snapshots.
-8. **Artifact provenance**: for each moved or copied artifact, record original source path and canonical evidence path.
+6. **Canonical artifact location**: generated runtime output artifacts should be written directly to `round_<n>/run/` when possible; otherwise collect/copy them there and remove redundant copies.
+7. **Selective run snapshotting**: copy stable source artifacts (tests/prompts/checklists/specs) into round `run/` only when they changed this round or are otherwise required for immutable audit snapshots.
+8. **Artifact provenance**: for each moved or copied artifact, record original source path and canonical run path.
 9. **Judge must justify overruling**: if Inspector is overruled, Judge writes explicit reasoning and evidence.
 10. **Verification strength standard**: apply `standards/verification_strength.md` for verification-spec quality, automated assertion strength, and enforcement expectations.
 11. **Automated assertion strength bar**: tests must satisfy the behavioral assertion requirements in `standards/verification_strength.md`; symbol-presence or non-`None` checks alone are insufficient unless explicitly justified.
@@ -163,6 +172,28 @@ Conductor launches Judge with:
 - standards and references resolved from `AGENTS.md`
 - Judge system prompt in `prompts/judge_system_prompt.md`
 
+### Judge invocation contract (mandatory)
+
+When Conductor launches Judge, the Judge prompt must not rely on file-path references alone for role-critical behavior.
+
+Conductor must embed these requirements directly in the Judge prompt text:
+
+1. **Delegation is mandatory**
+   - Judge must launch exactly one Builder sub-agent and one Inspector sub-agent in order.
+   - Judge must not perform Builder or Inspector work directly.
+   - If either sub-agent cannot be launched/completed, Judge must return `BLOCKED`.
+2. **First-turn context load is mandatory**
+   - Before implementation/verification actions, Judge must read `goal.md`, `verification_spec.md` (if present), prior `judge_resolution.md` (if any), and `standards/verification_strength.md`.
+3. **Single-round scope is mandatory**
+   - Judge must close only the current round and must not create/plan `round_<n+1>`.
+4. **Evidence routing is mandatory**
+   - Judge must enforce canonical `round_<n>/run/` placement for runtime outputs and provenance reporting for snapshots/moves.
+5. **Decision semantics are mandatory**
+   - Judge must use only `CONTINUE|READY_FOR_HUMAN|COMPLETE`, and set `blocker_detected` only for true hard blockers.
+
+Conductor should treat missing delegation receipts as a failed round orchestration.
+If delegation receipts are missing or inconsistent, do not accept the round as valid; stop with `BLOCKED` and report the protocol violation.
+
 Judge responsibilities for every round:
 
 1. determine `round_intent`,
@@ -172,6 +203,14 @@ Judge responsibilities for every round:
 5. launch Inspector sub-agent,
 6. resolve status in `judge_resolution.md`,
 7. update round memory inside `judge_resolution.md` (locked strengths, detected regressions, and next priority deltas).
+
+Judge must provide delegation receipts in `judge_resolution.md`:
+
+- `builder_subagent_invoked: true|false`
+- `builder_subagent_summary_ref` (identifier or summary reference)
+- `inspector_subagent_invoked: true|false`
+- `inspector_subagent_summary_ref` (identifier or summary reference)
+- `delegation_protocol_violations` (or `none`)
 
 Judge must stop after writing the current round's `judge_resolution.md`. Starting additional rounds is Conductor-only.
 
@@ -192,7 +231,9 @@ For `round_intent: build_verification_artifacts`:
   - agent checks: prompt artifacts and expected output schema/rubric,
   - human checks: guidance text/checklist for human sign-off.
 - Inspector verifies artifact quality and criterion coverage.
-- Builder writes produced verification artifacts directly into `round_<n>/evidence/` when possible, and records source->canonical path mappings.
+- Builder stores verification artifacts in normal project paths and records them in reports.
+- Builder stores runtime outputs (logs/results/output artifacts/reports) in `round_<n>/run/`.
+- When immutable audit snapshots are required, Builder may copy source artifacts into `round_<n>/run/` and records source->canonical path mappings.
 
 Within `round_intent: build_verification_artifacts`, Inspector must also enforce the red baseline:
 
@@ -202,13 +243,13 @@ Within `round_intent: build_verification_artifacts`, Inspector must also enforce
 For `round_intent: implement_solution`:
 
 - Builder implements product changes and updates evidence.
-- Builder keeps newly produced verification artifacts canonically in `round_<n>/evidence/` (no duplicate same-name files in round root).
+- Builder keeps newly produced runtime outputs canonically in `round_<n>/run/`.
 - Inspector confirms criteria closure and non-regression.
 
 For `round_intent: final_gate`:
 
 - Builder/Inspector ensure required agent and human evidence artifacts are present and valid.
-- Required evidence artifacts must exist in `round_<n>/evidence/` (or be copied there before final decision).
+- Required runtime/output artifacts must exist in `round_<n>/run/` (or be copied there before final decision).
 
 ### Step 4: Conductor decision
 
