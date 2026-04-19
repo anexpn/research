@@ -16,6 +16,11 @@ human_verification_evidence: <path(s) or none>
 - inspector_scope:
 - single_round_attestation: <judge confirms this resolution covers exactly one round and stops here>
 - automated_assertion_quality_summary: <pass/fail highlights from inspector assertion audit>
+- sequencing_audit:
+  - verification_first_required: <true|false>
+  - verification_baseline_present: <true|false>
+  - sequencing_violation: <true|false>
+  - sequencing_violation_details: <none OR why implementation started before verification baseline>
 
 ## Evidence artifact routing
 

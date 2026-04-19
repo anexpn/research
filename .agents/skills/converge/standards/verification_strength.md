@@ -13,6 +13,16 @@ Applies to:
 - Inspector review of automated verification artifacts.
 - Judge resolution when accepting or requesting deltas for verification quality.
 
+## Sequencing Requirement
+
+When `verification_spec.md` defines automated scenarios for open criteria, verification is a prerequisite to implementation:
+
+- establish automated checks first,
+- run red baseline to prove unmet criteria fail for expected reasons,
+- only then proceed with implementation rounds that aim to turn checks green.
+
+Rounds that skip this order should be treated as non-closable until sequencing is repaired.
+
 ## Verification Spec Requirements
 
 For each automated scenario, the spec must define measurable or falsifiable outcomes. At least one of:

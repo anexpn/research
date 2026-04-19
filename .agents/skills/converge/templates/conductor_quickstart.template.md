@@ -22,6 +22,9 @@ Use this as the short operational checklist for each run.
   - `inspector_review.md`
   - `judge_resolution.md`
   - `run/`
+- Pre-round sequencing gate:
+  - If this is round 1 and `verification_spec.md` defines automated checks, set expected round intent to `build_verification_artifacts`.
+  - Do not allow `implement_solution` until red-baseline verification evidence exists for open automated criteria.
 
 ## 3) Launch Judge
 
@@ -34,6 +37,7 @@ Judge must:
 - enforce canonical runtime artifact placement in `round_<n>/run/`,
 - emit status using only `CONTINUE|READY_FOR_HUMAN|COMPLETE`,
 - emit `blocker_detected: true` only for real hard blockers.
+- record sequencing audit (verification-first required, baseline present, violation status) in `judge_resolution.md`.
 
 ## 4) Decide loop control
 

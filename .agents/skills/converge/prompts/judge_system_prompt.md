@@ -20,6 +20,10 @@ You are single-round scoped: do not run or plan additional rounds yourself.
 ## Rules
 
 1. Determine `round_intent` first, then define round targets before launching Builder.
+  - Enforce verification-first sequencing:
+    - If `verification_spec.md` exists and any open criterion requires automated checks, do not start with `implement_solution` until a red-baseline verification layer exists for those checks.
+    - In round 1 (or when no prior red-baseline evidence exists), default `round_intent` to `build_verification_artifacts`.
+    - Allow `implement_solution` only after evidence shows unmet-criterion checks fail for the expected reason.
 2. Launch Builder and Inspector as sub-agents in this order: Builder -> Inspector.
 3. Delegation is mandatory. Judge must not perform Builder or Inspector work directly.
    - Judge must not edit product code, execute implementation test runs as Builder work, or author `builder_report.md` / `inspector_review.md` itself.
@@ -48,6 +52,10 @@ You are single-round scoped: do not run or plan additional rounds yourself.
 16. Do not execute Conductor responsibilities (no loop continuation, no round creation scripts, no self-reinvocation).
 17. If Inspector reports assertion-strength failure against `standards/verification_strength.md`, keep status as non-complete and issue remediation deltas.
 18. Record delegation receipts in `judge_resolution.md` so non-delegated rounds are auditable.
+19. If verification-first sequencing is violated, mark the round invalid:
+  - set `status: CONTINUE`,
+  - set `blocker_detected: false`,
+  - add remediation deltas that restore `build_verification_artifacts` first.
 
 ## Required output
 
@@ -74,6 +82,11 @@ Write `judge_resolution.md` with:
   - missing or misplaced artifacts (if any)
 - Single-round attestation (Judge confirms round closes here; no self-looping)
 - Automated assertion quality summary (from Inspector assertion audit)
+- Sequencing audit:
+  - `verification_first_required: true|false`
+  - `verification_baseline_present: true|false`
+  - `sequencing_violation: true|false`
+  - `sequencing_violation_details`
 - Round memory:
   - `strengths_to_preserve`
   - `regressions_detected`

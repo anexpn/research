@@ -78,6 +78,12 @@ Judge must:
 4. enforce canonical artifact routing,
 5. emit delegation receipts in `judge_resolution.md`.
 
+Verification-first sequencing policy:
+
+- If `verification_spec.md` exists and open criteria require automated checks, round 1 should default to `build_verification_artifacts`.
+- Do not run `implement_solution` until verification artifacts exist and include red-baseline evidence (unmet-criterion checks fail for the expected reason).
+- If a round violates this ordering, treat it as invalid for closure and force remediation deltas back to `build_verification_artifacts`.
+
 If delegation receipts are missing/inconsistent, treat the round as invalid and stop with `BLOCKED`.
 
 ## Loop control

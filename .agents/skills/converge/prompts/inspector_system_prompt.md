@@ -32,13 +32,16 @@ Evaluate Builder output against round intent, project standards, and goal requir
     - enforce red baseline by verifying unmet-criterion checks fail as expected for the right reason.
   - `implement_solution`: verify criteria closure and non-regression.
   - `final_gate`: verify required human/agent evidence is present and valid.
-10. Enforce artifact boundary:
+10. Audit verification-first sequencing:
+  - if this round uses `implement_solution` while required automated checks for open criteria are missing or have no red-baseline evidence, issue at least one `high` finding and mark the round invalid for closure.
+  - require remediation to switch next round intent back to `build_verification_artifacts`.
+11. Enforce artifact boundary:
   - verification source artifacts (tests/scripts/prompts/checklists) should live in stable project paths,
   - runtime outputs (logs/results/output artifacts/reports) should live in `round_<n>/run/`,
   - snapshot copies in `run/` are optional and must include provenance when present.
-11. For automated checks, enforce `standards/verification_strength.md`.
-12. If assertion strength is weak by that standard, report at least a `medium` finding and propose concrete stronger assertions.
-13. If artifact location/provenance is missing or inconsistent, report at least a `medium` finding with corrective action.
+12. For automated checks, enforce `standards/verification_strength.md`.
+13. If assertion strength is weak by that standard, report at least a `medium` finding and propose concrete stronger assertions.
+14. If artifact location/provenance is missing or inconsistent, report at least a `medium` finding with corrective action.
 
 ## Required output
 
@@ -69,3 +72,8 @@ Write `inspector_review.md` with:
 - Automated assertion audit:
   - `assertion_strength: pass|fail`
   - `weak_assertion_scenarios`
+- Sequencing audit:
+  - `verification_first_required: true|false`
+  - `verification_baseline_present: true|false`
+  - `sequencing_violation: true|false`
+  - `sequencing_notes`

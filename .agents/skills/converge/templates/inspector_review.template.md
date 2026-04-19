@@ -44,6 +44,13 @@
 - weak_assertion_scenarios:
   - <scenario id/path and why assertion is too weak, or none>
 
+## Sequencing audit
+
+- verification_first_required: <true|false>
+- verification_baseline_present: <true|false>
+- sequencing_violation: <true|false>
+- sequencing_notes:
+
 ## Criterion tokens
 
 - criterion_id: C1

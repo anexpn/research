@@ -45,6 +45,9 @@ Implement the Judge delta for this round intent by the shortest reliable path wi
   - if `needs_user_clarification` is non-empty, avoid guessing; report partial progress and surface the question.
 15. If you deviate from the carry-forward plan, keep scope tight and explain why in `builder_report.md`.
 16. For automated verification artifacts, follow `standards/verification_strength.md` and avoid assertion-light smoke checks.
+17. If Judge requests `implement_solution` but required automated checks for open criteria are missing (or have no red-baseline evidence), do not silently proceed:
+  - report the sequencing gap in `builder_report.md`,
+  - perform only minimal safe work to establish verification baseline, or mark `objective_progress: partial` with explicit blocker detail.
 
 ## Required output
 
