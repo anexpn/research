@@ -58,9 +58,12 @@ Use this logical layout:
     builder_report.md
     inspector_review.md
     judge_resolution.md
+    evidence/
   round_2/
     ...
 ```
+
+`round_<n>/evidence/` stores copied verification artifacts produced during that round (for example rendered images, exported logs, screenshots, profiling output, or generated reports). Round files must reference artifact paths inside this folder, not only original source paths.
 
 `verification_spec.md` is recommended and should define criterion-level verification intent for:
 
@@ -74,11 +77,13 @@ Use this logical layout:
 2. **One loop type**: every round uses the same Judge-led flow (Judge plans -> Builder executes -> Inspector verifies -> Judge resolves); only round intent changes.
 3. **Intent-driven rounds**: Judge sets `round_intent` explicitly (for example `build_verification_artifacts`, `implement_solution`, `final_gate`).
 4. **Evidence first**: Builder and Inspector claims must include concrete evidence (test output, log snippets, diff references, artifact paths).
-5. **Judge must justify overruling**: if Inspector is overruled, Judge writes explicit reasoning and evidence.
-6. **Round cap**: use `max rounds` from `goal.md` for this session.
-7. **No placeholder evidence**: concrete commands and artifact paths are required; placeholders invalidate the round.
-8. **Source-of-truth tokens only**: criterion status must be parsed from explicit token fields in canonical files, never inferred from prose.
-9. **Human verification timing default**: `final_only` unless `goal.md` or `verification_spec.md` says otherwise.
+5. **Artifact copy requirement**: when verification generates external artifacts, copy them into the current `round_<n>/evidence/` folder and cite copied paths in reports.
+6. **Artifact provenance**: for each copied artifact, record original source path and copied evidence path.
+7. **Judge must justify overruling**: if Inspector is overruled, Judge writes explicit reasoning and evidence.
+8. **Round cap**: use `max rounds` from `goal.md` for this session.
+9. **No placeholder evidence**: concrete commands and artifact paths are required; placeholders invalidate the round.
+10. **Source-of-truth tokens only**: criterion status must be parsed from explicit token fields in canonical files, never inferred from prose.
+11. **Human verification timing default**: `final_only` unless `goal.md` or `verification_spec.md` says otherwise.
 
 ## Conductor workflow
 
@@ -152,6 +157,7 @@ For `round_intent: build_verification_artifacts`:
   - agent checks: prompt artifacts and expected output schema/rubric,
   - human checks: guidance text/checklist for human sign-off.
 - Inspector verifies artifact quality and criterion coverage.
+- Builder copies produced verification artifacts into `round_<n>/evidence/` and records source->copied path mappings.
 
 Within `round_intent: build_verification_artifacts`, Inspector must also enforce the red baseline:
 
@@ -161,11 +167,13 @@ Within `round_intent: build_verification_artifacts`, Inspector must also enforce
 For `round_intent: implement_solution`:
 
 - Builder implements product changes and updates evidence.
+- Builder copies newly produced verification artifacts into `round_<n>/evidence/`.
 - Inspector confirms criteria closure and non-regression.
 
 For `round_intent: final_gate`:
 
 - Builder/Inspector ensure required agent and human evidence artifacts are present and valid.
+- Required evidence artifacts must exist in `round_<n>/evidence/` (or be copied there before final decision).
 
 ### Step 4: Conductor decision
 

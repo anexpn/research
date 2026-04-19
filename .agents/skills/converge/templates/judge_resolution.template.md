@@ -15,6 +15,14 @@ human_verification_evidence: <path(s) or none>
 - builder_inputs:
 - inspector_scope:
 
+## Evidence artifact routing
+
+- evidence_dir: `<round_path>/evidence/`
+- copied_artifacts:
+  - <artifact copied path and purpose>
+- missing_copies:
+  - <artifact that should have been copied but was not>
+
 ## Round memory
 
 - strengths_to_preserve:

@@ -31,6 +31,8 @@ Evaluate Builder output against round intent, project standards, and goal requir
     - enforce red baseline by verifying unmet-criterion checks fail as expected for the right reason.
   - `implement_solution`: verify criteria closure and non-regression.
   - `final_gate`: verify required human/agent evidence is present and valid.
+10. For any verification artifact produced this round, verify it was copied into `round_<n>/evidence/` and that report references use the copied path.
+11. If artifact copy/provenance is missing or inconsistent, report at least a `medium` finding with corrective action.
 
 ## Required output
 
@@ -54,3 +56,7 @@ Write `inspector_review.md` with:
   - `non_blocking_findings`
   - `unresolved_ambiguities`
   - `requires_goal_amendment`
+- Evidence artifact audit:
+  - `artifact_copy_compliance: pass|fail`
+  - `missing_or_unverifiable_artifacts`
+  - `provenance_mismatches`

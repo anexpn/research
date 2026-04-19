@@ -31,6 +31,14 @@
 - unresolved_ambiguities: 
 - requires_goal_amendment: <true|false>
 
+## Evidence artifact audit
+
+- artifact_copy_compliance: <pass|fail>
+- missing_or_unverifiable_artifacts:
+  - <artifact expected in round evidence folder but missing/unreadable>
+- provenance_mismatches:
+  - <source path / copied path mismatch or unclear mapping>
+
 ## Criterion tokens
 
 - criterion_id: C1

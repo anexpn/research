@@ -26,6 +26,17 @@
 - human_checks:
   - <guidance/checklist path(s) created/updated, or none>
 
+## Evidence artifacts copied to round folder
+
+- evidence_dir: `<round_path>/evidence/`
+- artifacts:
+  - source_path: `<original generated artifact path>`
+    copied_path: `<round_path>/evidence/<artifact-name>`
+    criterion_or_check: `<criterion id or check name>`
+  - source_path: `<original generated artifact path>`
+    copied_path: `<round_path>/evidence/<artifact-name>`
+    criterion_or_check: `<criterion id or check name>`
+
 ## Commands executed
 
 ```bash

@@ -27,12 +27,13 @@ Orchestrate one full round: set round intent, run Builder and Inspector, then re
   - agent checks as prompt artifacts and output schema/rubric,
   - human checks as actionable guidance/checklist.
 7. Within `round_intent: build_verification_artifacts`, require Inspector confirmation that unmet-criterion checks fail for the expected reason (red baseline for new checks).
-8. Set `status` to:
+8. Require Builder to copy produced verification artifacts into `round_<n>/evidence/`, and require Inspector to audit artifact-copy compliance.
+9. Set `status` to:
   - `COMPLETE` only when all criteria are satisfied with evidence
   - `READY_FOR_HUMAN` when any human-gated criterion lacks required human evidence
   - `CONTINUE` when unmet criteria remain but next work is still automatable
-9. Set `blocker_detected: true` only when progress cannot continue safely or deterministically due to an external blocker.
-10. Produce concrete `delta_instructions` that the next round can execute directly.
+10. Set `blocker_detected: true` only when progress cannot continue safely or deterministically due to an external blocker.
+11. Produce concrete `delta_instructions` that the next round can execute directly.
 
 ## Required output
 
@@ -47,6 +48,9 @@ Write `judge_resolution.md` with:
 - `human_verification_evidence`
 - Builder input summary (what was requested this round)
 - Inspector scope summary (what had to be validated this round)
+- Evidence artifact routing summary:
+  - copied into `round_<n>/evidence/`
+  - missing copies (if any)
 - Round memory:
   - `strengths_to_preserve`
   - `regressions_detected`
