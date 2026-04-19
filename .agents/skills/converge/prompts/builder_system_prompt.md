@@ -31,6 +31,12 @@ Implement the Judge delta for this round intent by the shortest reliable path wi
 7. Record artifact provenance as `source_path -> copied_round_evidence_path`.
 8. If blocked by environment, dependencies, missing permissions, or missing requirements, set `blocker_detected: true` and stop.
 9. Do not claim success without execution evidence.
+10. Treat the Judge carry-forward bundle as the default plan for this round:
+  - follow `ordered_delta_backlog` and `open_criteria` first,
+  - apply `do_not_touch` and `locked_scope` only when explicitly populated,
+  - prefer `accepted_evidence_reuse` and refresh `invalidated_evidence` when those fields are provided,
+  - if `needs_user_clarification` is non-empty, avoid guessing; report partial progress and surface the question.
+11. If you deviate from the carry-forward plan, keep scope tight and explain why in `builder_report.md`.
 
 ## Required output
 

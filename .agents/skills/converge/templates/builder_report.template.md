@@ -2,20 +2,24 @@
 
 ## Round
 
-
-
 ## Round Intent
 
 <build_verification_artifacts|implement_solution|final_gate>
 
 ## Plan for this round
 
+- carry_forward_bundle_consumed: <yes|partial|no>
+- backlog_ids_executed:
+  - 
+  - 
+- protected_scope_respected: <yes|not_applicable|no>
+- plan_deviation_reason: 
 - <Targeted change 1>
 - <Targeted change 2>
 
 ## Changes made
 
-- File: `<path>` - 
+- File: `<path>` -
 
 ## Verification artifacts
 
@@ -31,11 +35,11 @@
 - evidence_dir: `<round_path>/evidence/`
 - artifacts:
   - source_path: `<original generated artifact path>`
-    copied_path: `<round_path>/evidence/<artifact-name>`
-    criterion_or_check: `<criterion id or check name>`
+  copied_path: `<round_path>/evidence/<artifact-name>`
+  criterion_or_check: `<criterion id or check name>`
   - source_path: `<original generated artifact path>`
-    copied_path: `<round_path>/evidence/<artifact-name>`
-    criterion_or_check: `<criterion id or check name>`
+  copied_path: `<round_path>/evidence/<artifact-name>`
+  criterion_or_check: `<criterion id or check name>`
 
 ## Commands executed
 
@@ -53,5 +57,5 @@
 
 - objective_progress: <met|partial|not_met>
 - blocker_detected: <true|false>
-- blocker_details: 
+- blocker_details:
 

@@ -34,6 +34,7 @@ Orchestrate one full round: set round intent, run Builder and Inspector, then re
   - `CONTINUE` when unmet criteria remain but next work is still automatable
 10. Set `blocker_detected: true` only when progress cannot continue safely or deterministically due to an external blocker.
 11. Produce concrete `delta_instructions` that the next round can execute directly.
+12. Emit a structured carry-forward bundle for the next Builder round; avoid relying on narrative-only memory.
 
 ## Required output
 
@@ -55,10 +56,22 @@ Write `judge_resolution.md` with:
   - `strengths_to_preserve`
   - `regressions_detected`
   - `next_priority_deltas`
+- Carry-forward bundle for next Builder:
+  - required core:
+    - `open_criteria` (criterion id, failure reason, evidence path)
+    - `ordered_delta_backlog` (id, priority, action, done_condition)
+  - optional enrichments when useful:
+    - `locked_scope`
+    - `do_not_touch`
+    - `accepted_evidence_reuse`
+    - `invalidated_evidence`
+    - `risk_watchlist`
+    - `environment_notes`
+    - `needs_user_clarification`
 - Accepted findings
 - Overruled findings with evidence-backed rationale
 - Decision rationale
 - Loop control rationale (why continue, ready for human, or stop)
-- `delta_instructions` (ordered, actionable)
+- `delta_instructions` (ordered, actionable, reference `ordered_delta_backlog` id when present)
 - Completion evidence (if `COMPLETE`)
 

@@ -74,6 +74,12 @@ Use this logical layout:
 ## Operational guardrails
 
 1. **Required carry-forward context**: for each new round, pass `goal.md`, previous `judge_resolution.md`, and `verification_spec.md` when present.
+   - Judge should emit a structured carry-forward bundle inside `judge_resolution.md`.
+   - Keep a small required core:
+     - `open_criteria`: unmet criterion ids with failure reason and evidence path
+     - `ordered_delta_backlog`: priority-ordered Builder actions with stop conditions
+   - Add these when useful (recommended, not mandatory):
+     - `locked_scope`, `do_not_touch`, `accepted_evidence_reuse`, `invalidated_evidence`, `risk_watchlist`, `environment_notes`
 2. **One loop type**: every round uses the same Judge-led flow (Judge plans -> Builder executes -> Inspector verifies -> Judge resolves); only round intent changes.
 3. **Intent-driven rounds**: Judge sets `round_intent` explicitly (for example `build_verification_artifacts`, `implement_solution`, `final_gate`).
 4. **Evidence first**: Builder and Inspector claims must include concrete evidence (test output, log snippets, diff references, artifact paths).
@@ -147,6 +153,14 @@ Judge responsibilities for every round:
 5. launch Inspector sub-agent,
 6. resolve status in `judge_resolution.md`,
 7. update round memory inside `judge_resolution.md` (locked strengths, detected regressions, and next priority deltas).
+
+Judge-to-next-Builder handoff guideline:
+
+- Judge should make next-round Builder input executable without re-deriving intent from prose.
+- `delta_instructions` should reference `ordered_delta_backlog` ids when available.
+- If Inspector reports unresolved ambiguity, Judge must either:
+  - convert it into a concrete Builder-safe instruction, or
+  - mark it as `needs_user_clarification` and block continuation on that criterion.
 
 ### Step 3: Intent-specific expectations (same loop, different purpose)
 
