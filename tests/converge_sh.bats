@@ -344,7 +344,7 @@ EOF
     --prompt-file "$PROMPT_DIR/builder.md"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"resume only accepts --session-dir, --max-steps, and --dry-run."* ]]
+  [[ "$output" == *"resume only accepts -s/--session-dir, -n/--max-steps, and -d/--dry-run."* ]]
 }
 
 @test "records non-zero agent exit in step artifacts and loop log" {

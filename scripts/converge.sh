@@ -25,38 +25,38 @@ converge.sh - run or resume a rotating agent loop
 
 USAGE
   converge.sh run [options]
-  converge.sh resume --session-dir <path> [--max-steps <n>] [--dry-run]
+  converge.sh resume -s <path> [-n <n>] [-d]
   converge.sh [options]   # shorthand for run
 
 RUN OPTIONS
   Prompt source:
-    --prompt        Inline prompt text. Repeat to rotate prompts.
-    --prompt-file   Prompt file path. Repeat to rotate prompts.
+    -p, --prompt        Inline prompt text. Repeat to rotate prompts.
+    -f, --prompt-file   Prompt file path. Repeat to rotate prompts.
   Agent source:
-    --agent-cmd     Agent command, repeatable.
-    --agent-preset  Agent preset name (codex, claude, cursor-agent), repeatable.
+    -a, --agent-cmd     Agent command, repeatable.
+    -A, --agent-preset  Agent preset name (codex, claude, cursor-agent), repeatable.
 
 RUN OPTIONAL
-  --session-dir   Session root for run artifacts.
-  --max-steps     Number of loop iterations (default: 10).
-  --tmux          Run each step in a tmux window for live observability.
-  --tmux-cleanup  Auto-kill tmux session when loop exits or is interrupted.
-  --tmux-session-name
+  -s, --session-dir   Session root for run artifacts.
+  -n, --max-steps     Number of loop iterations (default: 10).
+  -t, --tmux          Run each step in a tmux window for live observability.
+  -x, --tmux-cleanup  Auto-kill tmux session when loop exits or is interrupted.
+  -T, --tmux-session-name
                   Optional tmux session name override.
-  --no-handoff    Disable handoff artifacts (enabled by default with --session-dir).
-  --dry-run       Print resolved execution plan and exit.
+  -H, --no-handoff    Disable handoff artifacts (enabled by default with --session-dir).
+  -d, --dry-run       Print resolved execution plan and exit.
 
 RESUME OPTIONS
-  --session-dir   Existing session root to resume.
-  --max-steps     New total max steps for this run. Only reassignment allowed.
-  --dry-run       Print remaining plan and exit.
+  -s, --session-dir   Existing session root to resume.
+  -n, --max-steps     New total max steps for this run. Only reassignment allowed.
+  -d, --dry-run       Print remaining plan and exit.
 
   -h, --help      Show this help message.
 
 EXAMPLES
-  converge.sh run --agent-preset codex --prompt "You are builder" --prompt-file ./prompts/inspector.md --max-steps 2
-  converge.sh run --agent-cmd "claude -p --permission-mode bypassPermissions" --session-dir ./session --prompt-file ./prompts/judge.md --no-handoff
-  converge.sh resume --session-dir ./session --max-steps 12
+  converge.sh run -A codex -p "You are builder" -f ./prompts/inspector.md -n 2
+  converge.sh run -a "claude -p --permission-mode bypassPermissions" -s ./session -f ./prompts/judge.md -H
+  converge.sh resume -s ./session -n 12
 EOF
 }
 
@@ -445,8 +445,8 @@ trap 'handle_sigterm' TERM
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --session-dir) session_dir="${2:-}"; shift 2 ;;
-    --max-steps)
+    -s|--session-dir) session_dir="${2:-}"; shift 2 ;;
+    -n|--max-steps)
       if [[ "$mode" == "resume" ]]; then
         resume_max_steps="${2:-}"
       else
@@ -454,37 +454,37 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 2
       ;;
-    --dry-run) dry_run=1; shift ;;
-    --prompt|--prompt-file|--agent-cmd|--agent-preset|--tmux|--tmux-cleanup|--tmux-session-name|--no-handoff)
+    -d|--dry-run) dry_run=1; shift ;;
+    -p|--prompt|-f|--prompt-file|-a|--agent-cmd|-A|--agent-preset|-t|--tmux|-x|--tmux-cleanup|-T|--tmux-session-name|-H|--no-handoff)
       if [[ "$mode" == "resume" ]]; then
-        echo "resume only accepts --session-dir, --max-steps, and --dry-run." >&2
+        echo "resume only accepts -s/--session-dir, -n/--max-steps, and -d/--dry-run." >&2
         exit 1
       fi
       case "$1" in
-        --prompt)
+        -p|--prompt)
           cli_prompt_kinds+=("inline")
           cli_prompt_values+=("${2:-}")
           shift 2
           ;;
-        --prompt-file)
+        -f|--prompt-file)
           cli_prompt_kinds+=("file")
           cli_prompt_values+=("${2:-}")
           shift 2
           ;;
-        --agent-cmd)
+        -a|--agent-cmd)
           agent_cmds+=("${2:-}")
           shift 2
           ;;
-        --agent-preset)
+        -A|--agent-preset)
           preset="${2:-}"
           [[ -n "$preset" ]] || { echo "--agent-preset requires a non-empty value." >&2; exit 1; }
           agent_cmds+=("$(agent_preset_command "$preset")")
           shift 2
           ;;
-        --tmux) use_tmux=1; shift ;;
-        --tmux-cleanup) tmux_cleanup=1; shift ;;
-        --tmux-session-name) tmux_session_name_requested="${2:-}"; shift 2 ;;
-        --no-handoff) handoff_disabled=1; shift ;;
+        -t|--tmux) use_tmux=1; shift ;;
+        -x|--tmux-cleanup) tmux_cleanup=1; shift ;;
+        -T|--tmux-session-name) tmux_session_name_requested="${2:-}"; shift 2 ;;
+        -H|--no-handoff) handoff_disabled=1; shift ;;
       esac
       ;;
     -h|--help)
