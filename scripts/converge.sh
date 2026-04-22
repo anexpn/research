@@ -1,37 +1,86 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# File protocol (when --session-dir is set):
+# - <session-dir>/run/meta/max_steps.txt
+# - <session-dir>/run/meta/handoff_enabled.txt
+# - <session-dir>/run/meta/use_tmux.txt
+# - <session-dir>/run/meta/tmux_cleanup.txt
+# - <session-dir>/run/meta/tmux_session_name.txt
+# - <session-dir>/run/meta/prompts.tsv
+# - <session-dir>/run/meta/agent_cmds.txt
+# - <session-dir>/run/loop/loop.log
+# - <session-dir>/run/sNNN/effective_prompt.md
+# - <session-dir>/run/sNNN/stdout.log
+# - <session-dir>/run/sNNN/stderr.log
+# - <session-dir>/run/sNNN/exit_code.txt
+# - <session-dir>/run/sNNN/handoff.md (only when handoff is enabled)
+# Handoff defaults:
+# - enabled with --session-dir
+# - disabled without --session-dir or with --no-handoff
+
 usage() {
   cat <<'EOF'
-converge.sh - run rotating agent loop with optional session artifacts and handoff
+converge.sh - run or resume a rotating agent loop
 
 USAGE
-  converge.sh [--session-dir <path>] --prompt-list <path> --agent-cmd "<command>" [--agent-cmd "<command>" ...] [--max-steps <n>] [--tmux] [--tmux-session-name <name>] [--handoff | --no-handoff]
+  converge.sh run [options]
+  converge.sh resume --session-dir <path> [--max-steps <n>] [--dry-run]
+  converge.sh [options]   # shorthand for run
 
-REQUIRED
-  --prompt-list   File with one prompt path per line (rotation order).
-  --agent-cmd     Agent command, e.g. "codex exec" or "claude". Repeat to rotate commands per step.
+RUN OPTIONS
+  Prompt source:
+    --prompt        Inline prompt text. Repeat to rotate prompts.
+    --prompt-file   Prompt file path. Repeat to rotate prompts.
+  Agent source:
+    --agent-cmd     Agent command, repeatable.
+    --agent-preset  Agent preset name (codex, claude, cursor-agent), repeatable.
 
-OPTIONAL
+RUN OPTIONAL
   --session-dir   Session root for run artifacts.
   --max-steps     Number of loop iterations (default: 10).
   --tmux          Run each step in a tmux window for live observability.
+  --tmux-cleanup  Auto-kill tmux session when loop exits or is interrupted.
   --tmux-session-name
                   Optional tmux session name override.
-  --handoff       Force handoff artifacts on. Requires --session-dir.
-  --no-handoff    Disable handoff artifacts.
+  --no-handoff    Disable handoff artifacts (enabled by default with --session-dir).
+  --dry-run       Print resolved execution plan and exit.
+
+RESUME OPTIONS
+  --session-dir   Existing session root to resume.
+  --max-steps     New total max steps for this run. Only reassignment allowed.
+  --dry-run       Print remaining plan and exit.
+
   -h, --help      Show this help message.
 
-PROMPT LIST RULES
-  - Empty lines are ignored.
-  - Lines starting with # are ignored.
-  - Relative prompt paths are resolved from the prompt-list directory.
-
 EXAMPLES
-  converge.sh --prompt-list ./prompts.txt --agent-cmd "codex exec --dangerously-bypass-approvals-and-sandbox -" --max-steps 2
-  converge.sh --session-dir ./session --prompt-list ./prompts.txt --agent-cmd "claude -p --permission-mode bypassPermissions" --no-handoff
-  converge.sh --session-dir ./session --prompt-list ./prompts.txt --agent-cmd "cursor-agent -p --yolo --trust --approve-mcps" --handoff
+  converge.sh run --agent-preset codex --prompt "You are builder" --prompt-file ./prompts/inspector.md --max-steps 2
+  converge.sh run --agent-cmd "claude -p --permission-mode bypassPermissions" --session-dir ./session --prompt-file ./prompts/judge.md --no-handoff
+  converge.sh resume --session-dir ./session --max-steps 12
 EOF
+}
+
+agent_preset_command() {
+  local preset="$1"
+  case "$preset" in
+    codex) printf '%s\n' "codex exec --dangerously-bypass-approvals-and-sandbox -" ;;
+    claude) printf '%s\n' "claude -p --permission-mode bypassPermissions" ;;
+    cursor-agent) printf '%s\n' "cursor-agent -p --yolo --trust --approve-mcps" ;;
+    *)
+      echo "Unknown --agent-preset: $preset" >&2
+      echo "Allowed presets: codex, claude, cursor-agent" >&2
+      return 1
+      ;;
+  esac
+}
+
+resolve_file_path() {
+  local path="$1"
+  if [[ "$path" = /* ]]; then
+    printf '%s\n' "$path"
+    return
+  fi
+  printf '%s/%s\n' "$(cd "$(dirname "$path")" && pwd)" "$(basename "$path")"
 }
 
 sanitize_tmux_label() {
@@ -67,7 +116,7 @@ configure_tmux_window() {
 }
 
 emit_effective_prompt() {
-  local step="$1" agent_cmd="$2" input_handoff="$3" output_handoff="$4" prompt="$5"
+  local step="$1" agent_cmd="$2" input_handoff="$3" output_handoff="$4" prompt_kind="$5" prompt_value="$6"
   echo "# Runtime Protocol"
   echo
   echo "- step: $step"
@@ -87,111 +136,470 @@ emit_effective_prompt() {
   echo
   echo "# Role Prompt"
   echo
-  cat "$prompt"
+  if [[ "$prompt_kind" == "file" ]]; then
+    cat "$prompt_value"
+  else
+    printf '%s\n' "$prompt_value"
+  fi
 }
 
 build_tmux_step_command() {
-  local payload="$1" agent_cmd="$2" stdout_log="${3:-}" stderr_log="${4:-}"
-  local escaped_payload escaped_agent_cmd command escaped_stdout escaped_stderr
+  local payload="$1" agent_cmd="$2" wait_channel="$3" exit_code_file="$4" stdout_log="${5:-}" stderr_log="${6:-}"
+  local escaped_payload escaped_agent_cmd command escaped_stdout escaped_stderr escaped_wait_channel escaped_exit_code_file
   escaped_payload="$(printf '%q' "$payload")"
   escaped_agent_cmd="$(printf '%q' "$agent_cmd")"
+  escaped_wait_channel="$(printf '%q' "$wait_channel")"
+  escaped_exit_code_file="$(printf '%q' "$exit_code_file")"
   command="printf '%s' $escaped_payload | bash -c $escaped_agent_cmd"
   if [[ -n "$stdout_log" && -n "$stderr_log" ]]; then
     escaped_stdout="$(printf '%q' "$stdout_log")"
     escaped_stderr="$(printf '%q' "$stderr_log")"
     command="$command > >(tee $escaped_stdout) 2> >(tee $escaped_stderr >&2)"
   fi
-  printf 'set -o pipefail; %s\n' "$command"
+  printf "set -o pipefail; %s; code=\$?; printf '%%s\\n' \"\$code\" > %s; tmux wait-for -S %s; exit \"\$code\"\n" \
+    "$command" "$escaped_exit_code_file" "$escaped_wait_channel"
+}
+
+build_tmux_wait_channel() {
+  local session_name="$1" window_name="$2" step="$3" safe_session safe_window
+  safe_session="$(sanitize_tmux_label "$session_name" session 32)"
+  safe_window="$(sanitize_tmux_label "$window_name" window 32)"
+  printf 'converge.%s.%s.%03d.%d\n' "$safe_session" "$safe_window" "$step" "$$"
 }
 
 wait_for_tmux_window() {
-  local session_name="$1" window_name="$2" target dead code
-  target="${session_name}:${window_name}"
-  while true; do
-    dead="$(tmux list-panes -t "$target" -F '#{pane_dead}' 2>/dev/null || true)"
-    [[ "$dead" == "1" ]] && break
-    sleep 0.1
-  done
-  code="$(tmux display-message -p -t "$target" '#{pane_dead_status}')"
-  printf '%s\n' "${code:-1}"
+  local wait_channel="$1" exit_code_file="$2" code=""
+  tmux_wait_code=""
+  active_tmux_wait_pid=""
+  tmux wait-for "$wait_channel" &
+  active_tmux_wait_pid=$!
+
+  set +e
+  wait "$active_tmux_wait_pid"
+  tmux_wait_status=$?
+  set -e
+  active_tmux_wait_pid=""
+  if [[ "$tmux_wait_status" -ne 0 ]]; then
+    return 1
+  fi
+  if [[ -f "$exit_code_file" ]]; then
+    code="$(<"$exit_code_file")"
+  fi
+  if [[ "$code" =~ ^[0-9]+$ ]]; then
+    tmux_wait_code="$code"
+    return 0
+  fi
+  return 1
 }
 
-session_dir="" prompt_list="" max_steps=10 use_tmux=0 tmux_session_name="" tmux_created=0 handoff_mode="auto"
+cleanup_active_tmux_files() {
+  if [[ -n "$active_tmux_exit_code_file" ]]; then
+    rm -f "$active_tmux_exit_code_file"
+    active_tmux_exit_code_file=""
+  fi
+}
+
+cleanup_on_interrupt() {
+  set +e
+  if [[ -n "${active_tmux_wait_pid:-}" ]]; then
+    kill "$active_tmux_wait_pid" >/dev/null 2>&1 || true
+    active_tmux_wait_pid=""
+  fi
+  cleanup_active_tmux_files
+  if [[ "$use_tmux" -eq 1 && "$tmux_cleanup" -eq 1 && -n "$tmux_session_name" ]]; then
+    tmux has-session -t "$tmux_session_name" >/dev/null 2>&1 && tmux kill-session -t "$tmux_session_name" >/dev/null 2>&1
+  fi
+  exit "${1:-130}"
+}
+
+handle_sigint() {
+  echo "Ctrl-C received; forcing quit now." >&2
+  trap - INT TERM
+  cleanup_on_interrupt 130
+}
+
+handle_sigterm() {
+  echo "Termination signal received; cleaning up." >&2
+  cleanup_on_interrupt 143
+}
+
+write_run_metadata() {
+  local meta_dir="$1"
+  mkdir -p "$meta_dir"
+  printf '%s\n' "$max_steps" > "$meta_dir/max_steps.txt"
+  printf '%s\n' "$handoff_enabled" > "$meta_dir/handoff_enabled.txt"
+  printf '%s\n' "$use_tmux" > "$meta_dir/use_tmux.txt"
+  printf '%s\n' "$tmux_cleanup" > "$meta_dir/tmux_cleanup.txt"
+  printf '%s\n' "$tmux_session_name_requested" > "$meta_dir/tmux_session_name.txt"
+  : > "$meta_dir/prompts.tsv"
+  : > "$meta_dir/agent_cmds.txt"
+  for idx in "${!prompt_values[@]}"; do
+    printf '%s\t%s\n' "${prompt_kinds[$idx]}" "${prompt_values[$idx]}" >> "$meta_dir/prompts.tsv"
+  done
+  printf '%s\n' "${agent_cmds[@]}" > "$meta_dir/agent_cmds.txt"
+}
+
+load_run_metadata() {
+  local meta_dir="$1"
+  local prompts_file="$meta_dir/prompts.tsv"
+  local cmds_file="$meta_dir/agent_cmds.txt"
+  [[ -f "$meta_dir/max_steps.txt" ]] || { echo "Cannot resume: missing $meta_dir/max_steps.txt" >&2; exit 1; }
+  [[ -f "$meta_dir/handoff_enabled.txt" ]] || { echo "Cannot resume: missing $meta_dir/handoff_enabled.txt" >&2; exit 1; }
+  [[ -f "$meta_dir/use_tmux.txt" ]] || { echo "Cannot resume: missing $meta_dir/use_tmux.txt" >&2; exit 1; }
+  [[ -f "$meta_dir/tmux_session_name.txt" ]] || { echo "Cannot resume: missing $meta_dir/tmux_session_name.txt" >&2; exit 1; }
+  [[ -f "$prompts_file" ]] || { echo "Cannot resume: missing $prompts_file" >&2; exit 1; }
+  [[ -f "$cmds_file" ]] || { echo "Cannot resume: missing $cmds_file" >&2; exit 1; }
+
+  stored_max_steps="$(<"$meta_dir/max_steps.txt")"
+  handoff_enabled="$(<"$meta_dir/handoff_enabled.txt")"
+  use_tmux="$(<"$meta_dir/use_tmux.txt")"
+  if [[ -f "$meta_dir/tmux_cleanup.txt" ]]; then
+    tmux_cleanup="$(<"$meta_dir/tmux_cleanup.txt")"
+  else
+    tmux_cleanup=0
+  fi
+  tmux_session_name_requested="$(<"$meta_dir/tmux_session_name.txt")"
+  [[ "$stored_max_steps" =~ ^[0-9]+$ && "$stored_max_steps" -gt 0 ]] || { echo "Invalid stored max steps: $stored_max_steps" >&2; exit 1; }
+  [[ "$handoff_enabled" =~ ^[01]$ ]] || { echo "Invalid stored handoff flag: $handoff_enabled" >&2; exit 1; }
+  [[ "$use_tmux" =~ ^[01]$ ]] || { echo "Invalid stored tmux flag: $use_tmux" >&2; exit 1; }
+  [[ "$tmux_cleanup" =~ ^[01]$ ]] || { echo "Invalid stored tmux cleanup flag: $tmux_cleanup" >&2; exit 1; }
+
+  prompt_kinds=()
+  prompt_values=()
+  prompt_labels=()
+  while IFS=$'\t' read -r prompt_kind prompt_value || [[ -n "$prompt_kind$prompt_value" ]]; do
+    [[ -n "$prompt_kind" ]] || continue
+    prompt_kinds+=("$prompt_kind")
+    prompt_values+=("$prompt_value")
+    if [[ "$prompt_kind" == "file" ]]; then
+      prompt_labels+=("$(basename "$prompt_value")")
+    else
+      prompt_labels+=("inline")
+    fi
+  done < "$prompts_file"
+
+  agent_cmds=()
+  while IFS= read -r cmd || [[ -n "$cmd" ]]; do
+    [[ -n "$cmd" ]] || continue
+    agent_cmds+=("$cmd")
+  done < "$cmds_file"
+}
+
+require_positive_integer() {
+  local value="$1" flag="$2"
+  [[ "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]] || {
+    echo "$flag must be a positive integer." >&2
+    exit 1
+  }
+}
+
+validate_cli_prompts() {
+  local idx prompt_kind prompt_value
+  for idx in "${!cli_prompt_values[@]}"; do
+    prompt_kind="${cli_prompt_kinds[$idx]}"
+    prompt_value="${cli_prompt_values[$idx]}"
+    [[ -n "$prompt_value" ]] || {
+      if [[ "$prompt_kind" == "inline" ]]; then
+        echo "--prompt requires a non-empty value." >&2
+      else
+        echo "--prompt-file requires a non-empty value." >&2
+      fi
+      exit 1
+    }
+    if [[ "$prompt_kind" == "file" ]]; then
+      [[ -f "$prompt_value" ]] || { echo "Prompt file not found: $prompt_value" >&2; exit 1; }
+    fi
+  done
+}
+
+build_prompts_from_cli() {
+  local idx prompt_kind prompt_value path
+  prompt_kinds=()
+  prompt_values=()
+  prompt_labels=()
+  for idx in "${!cli_prompt_values[@]}"; do
+    prompt_kind="${cli_prompt_kinds[$idx]}"
+    prompt_value="${cli_prompt_values[$idx]}"
+    if [[ "$prompt_kind" == "file" ]]; then
+      path="$(resolve_file_path "$prompt_value")"
+      prompt_kinds+=("file")
+      prompt_values+=("$path")
+      prompt_labels+=("$(basename "$path")")
+    else
+      prompt_kinds+=("inline")
+      prompt_values+=("$prompt_value")
+      prompt_labels+=("inline")
+    fi
+  done
+}
+
+ensure_prompt_files_exist() {
+  local idx prompt_kind prompt_value
+  for idx in "${!prompt_values[@]}"; do
+    prompt_kind="${prompt_kinds[$idx]}"
+    prompt_value="${prompt_values[$idx]}"
+    if [[ "$prompt_kind" == "file" ]]; then
+      [[ -f "$prompt_value" ]] || { echo "Prompt file not found: $prompt_value" >&2; exit 1; }
+    fi
+  done
+}
+
+find_last_completed_step() {
+  local root="$1" step_dir stem num last=0
+  for step_dir in "$root"/s[0-9][0-9][0-9]; do
+    [[ -d "$step_dir" ]] || continue
+    [[ -f "$step_dir/exit_code.txt" ]] || continue
+    stem="$(basename "$step_dir")"
+    num="${stem#s}"
+    [[ "$num" =~ ^[0-9]+$ ]] || continue
+    (( num > last )) && last="$num"
+  done
+  printf '%s\n' "$last"
+}
+
+resolve_step_context() {
+  local step="$1" prompt_index
+  prompt_index="$(( (step - 1) % ${#prompt_values[@]} ))"
+  step_prompt_kind="${prompt_kinds[$prompt_index]}"
+  step_prompt_value="${prompt_values[$prompt_index]}"
+  step_prompt_label="${prompt_labels[$prompt_index]}"
+  step_agent_cmd="${agent_cmds[$(( (step - 1) % ${#agent_cmds[@]} ))]}"
+}
+
+compute_handoff_paths() {
+  local step="$1"
+  step_input_handoff=""
+  step_output_handoff=""
+  if [[ -n "$session_dir" && "$handoff_enabled" -eq 1 ]]; then
+    if [[ "$step" -gt 1 ]]; then
+      step_input_handoff="$(printf '%s/s%03d/handoff.md' "$run_dir" "$((step - 1))")"
+    fi
+    step_output_handoff="$(printf '%s/s%03d/handoff.md' "$run_dir" "$step")"
+  fi
+}
+
+print_plan() {
+  local start_step="$1" end_step="$2"
+  local step input_handoff output_handoff
+  echo "Dry run plan"
+  echo "mode=$mode"
+  [[ -n "$session_dir" ]] && echo "session_dir=$session_dir"
+  echo "start_step=$start_step"
+  echo "max_steps=$end_step"
+  echo "prompt_count=${#prompt_values[@]}"
+  echo "agent_cmd_count=${#agent_cmds[@]}"
+  for ((step=start_step; step<=end_step; step++)); do
+    resolve_step_context "$step"
+    compute_handoff_paths "$step"
+    input_handoff="$step_input_handoff"
+    output_handoff="$step_output_handoff"
+    echo "[step $step] prompt=$step_prompt_label kind=$step_prompt_kind"
+    if [[ "$step_prompt_kind" == "file" ]]; then
+      echo "  prompt_file=$step_prompt_value"
+    fi
+    echo "  agent_cmd=$step_agent_cmd"
+    if [[ -n "$input_handoff" ]]; then
+      echo "  input_handoff=$input_handoff"
+    fi
+    if [[ -n "$output_handoff" ]]; then
+      echo "  output_handoff=$output_handoff"
+    fi
+  done
+  return 0
+}
+
+mode="run"
+if [[ $# -gt 0 ]]; then
+  case "$1" in
+    run|resume)
+      mode="$1"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --*)
+      mode="run"
+      ;;
+    *)
+      echo "Unknown subcommand: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+fi
+
+session_dir="" max_steps=10 use_tmux=0 tmux_cleanup=0 tmux_session_name="" tmux_session_name_requested="" tmux_created=0 handoff_disabled=0
+active_tmux_exit_code_file=""
+active_tmux_wait_pid=""
+tmux_wait_code=""
+dry_run=0
+cli_prompt_kinds=()
+cli_prompt_values=()
 agent_cmds=()
+resume_max_steps=""
+
+trap 'handle_sigint' INT
+trap 'handle_sigterm' TERM
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --session-dir) session_dir="${2:-}"; shift 2 ;;
-    --prompt-list) prompt_list="${2:-}"; shift 2 ;;
-    --agent-cmd) agent_cmds+=("${2:-}"); shift 2 ;;
-    --max-steps) max_steps="${2:-}"; shift 2 ;;
-    --tmux) use_tmux=1; shift ;;
-    --tmux-session-name) tmux_session_name="${2:-}"; shift 2 ;;
-    --handoff) handoff_mode="on"; shift ;;
-    --no-handoff) handoff_mode="off"; shift ;;
-    -h|--help) usage; exit 0 ;;
+    --max-steps)
+      if [[ "$mode" == "resume" ]]; then
+        resume_max_steps="${2:-}"
+      else
+        max_steps="${2:-}"
+      fi
+      shift 2
+      ;;
+    --dry-run) dry_run=1; shift ;;
+    --prompt|--prompt-file|--agent-cmd|--agent-preset|--tmux|--tmux-cleanup|--tmux-session-name|--no-handoff)
+      if [[ "$mode" == "resume" ]]; then
+        echo "resume only accepts --session-dir, --max-steps, and --dry-run." >&2
+        exit 1
+      fi
+      case "$1" in
+        --prompt)
+          cli_prompt_kinds+=("inline")
+          cli_prompt_values+=("${2:-}")
+          shift 2
+          ;;
+        --prompt-file)
+          cli_prompt_kinds+=("file")
+          cli_prompt_values+=("${2:-}")
+          shift 2
+          ;;
+        --agent-cmd)
+          agent_cmds+=("${2:-}")
+          shift 2
+          ;;
+        --agent-preset)
+          preset="${2:-}"
+          [[ -n "$preset" ]] || { echo "--agent-preset requires a non-empty value." >&2; exit 1; }
+          agent_cmds+=("$(agent_preset_command "$preset")")
+          shift 2
+          ;;
+        --tmux) use_tmux=1; shift ;;
+        --tmux-cleanup) tmux_cleanup=1; shift ;;
+        --tmux-session-name) tmux_session_name_requested="${2:-}"; shift 2 ;;
+        --no-handoff) handoff_disabled=1; shift ;;
+      esac
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
   esac
 done
 
-[[ -n "$prompt_list" && ${#agent_cmds[@]} -gt 0 ]] || { usage >&2; exit 1; }
-[[ -f "$prompt_list" ]] || { echo "Prompt list not found: $prompt_list" >&2; exit 1; }
-[[ "$max_steps" =~ ^[0-9]+$ && "$max_steps" -gt 0 ]] || { echo "--max-steps must be a positive integer." >&2; exit 1; }
-for agent_cmd in "${agent_cmds[@]}"; do
-  [[ -n "$agent_cmd" ]] || { echo "--agent-cmd requires a non-empty value." >&2; exit 1; }
-done
-[[ "$handoff_mode" != "on" || -n "$session_dir" ]] || { echo "--handoff requires --session-dir." >&2; exit 1; }
-if [[ "$handoff_mode" == "auto" ]]; then
-  if [[ -n "$session_dir" ]]; then
+prompt_kinds=()
+prompt_values=()
+prompt_labels=()
+stored_max_steps=""
+last_completed_step=0
+start_step=1
+if [[ "$mode" == "run" ]]; then
+  if [[ ${#cli_prompt_values[@]} -eq 0 ]]; then
+    echo "Provide at least one --prompt or --prompt-file." >&2
+    usage >&2
+    exit 1
+  fi
+  [[ ${#agent_cmds[@]} -gt 0 ]] || { usage >&2; exit 1; }
+  require_positive_integer "$max_steps" "--max-steps"
+  for agent_cmd in "${agent_cmds[@]}"; do
+    [[ -n "$agent_cmd" ]] || { echo "--agent-cmd requires a non-empty value." >&2; exit 1; }
+  done
+  validate_cli_prompts
+  if [[ -n "$session_dir" && "$handoff_disabled" -eq 0 ]]; then
     handoff_enabled=1
   else
     handoff_enabled=0
   fi
-elif [[ "$handoff_mode" == "on" ]]; then
-  handoff_enabled=1
+  if [[ -n "$session_dir" ]]; then
+    if [[ "$dry_run" -eq 1 ]]; then
+      session_dir="$(cd "$(dirname "$session_dir")" && pwd)/$(basename "$session_dir")"
+    else
+      session_dir="$(mkdir -p "$session_dir" && cd "$session_dir" && pwd)"
+    fi
+  fi
+  build_prompts_from_cli
+  [[ ${#prompt_values[@]} -gt 0 ]] || { echo "No prompts were provided." >&2; exit 1; }
 else
-  handoff_enabled=0
-fi
+  [[ -n "$session_dir" ]] || { echo "resume requires --session-dir." >&2; exit 1; }
+  session_dir="$(cd "$session_dir" && pwd)"
+  run_dir="$session_dir/run"
+  meta_dir="$run_dir/meta"
+  [[ -d "$run_dir" ]] || { echo "Cannot resume: run directory not found: $run_dir" >&2; exit 1; }
+  load_run_metadata "$meta_dir"
 
-if [[ -n "$session_dir" ]]; then
-  session_dir="$(mkdir -p "$session_dir" && cd "$session_dir" && pwd)"
+  if [[ -n "$resume_max_steps" ]]; then
+    require_positive_integer "$resume_max_steps" "--max-steps"
+    max_steps="$resume_max_steps"
+  else
+    max_steps="$stored_max_steps"
+  fi
+  last_completed_step="$(find_last_completed_step "$run_dir")"
+  if (( max_steps < last_completed_step )); then
+    echo "--max-steps must be >= last completed step ($last_completed_step)." >&2
+    exit 1
+  fi
+  start_step=$((last_completed_step + 1))
+  ensure_prompt_files_exist
+  [[ ${#prompt_values[@]} -gt 0 ]] || { echo "Cannot resume: no stored prompts found." >&2; exit 1; }
+  [[ ${#agent_cmds[@]} -gt 0 ]] || { echo "Cannot resume: no stored agent commands found." >&2; exit 1; }
 fi
-prompt_list="$(cd "$(dirname "$prompt_list")" && pwd)/$(basename "$prompt_list")"
-prompt_list_dir="$(cd "$(dirname "$prompt_list")" && pwd)"
-
-prompts=()
-while IFS= read -r raw || [[ -n "$raw" ]]; do
-  line="$(printf '%s' "$raw" | sed 's/[[:space:]]*$//')"
-  [[ -z "$line" || "$line" == \#* ]] && continue
-  path="$line"; [[ "$path" = /* ]] || path="$prompt_list_dir/$path"
-  [[ -f "$path" ]] || { echo "Prompt file not found: $path" >&2; exit 1; }
-  prompts+=("$path")
-done < "$prompt_list"
-[[ ${#prompts[@]} -gt 0 ]] || { echo "Prompt list contains no usable prompt files." >&2; exit 1; }
 
 run_dir=""
 loop_log=""
 if [[ -n "$session_dir" ]]; then
   run_dir="$session_dir/run"
   loop_log="$run_dir/loop/loop.log"
-  mkdir -p "$run_dir/loop"
-  touch "$loop_log"
+  if [[ "$dry_run" -eq 0 ]]; then
+    mkdir -p "$run_dir/loop"
+    touch "$loop_log"
+  fi
 fi
 
 if [[ "$use_tmux" -eq 1 ]]; then
   command -v tmux >/dev/null 2>&1 || { echo "--tmux requires tmux on PATH." >&2; exit 1; }
-  tmux_session_name="$(build_tmux_session_name "$tmux_session_name")"
-  if tmux has-session -t "$tmux_session_name" >/dev/null 2>&1; then
-    echo "tmux session already exists: $tmux_session_name" >&2
-    exit 1
+  tmux_session_name="$(build_tmux_session_name "$tmux_session_name_requested")"
+  if [[ "$dry_run" -eq 0 ]]; then
+    if tmux has-session -t "$tmux_session_name" >/dev/null 2>&1; then
+      echo "tmux session already exists: $tmux_session_name" >&2
+      exit 1
+    fi
   fi
 fi
 
-echo "Starting agent loop"
+if [[ "$tmux_cleanup" -eq 1 && "$use_tmux" -eq 0 ]]; then
+  echo "--tmux-cleanup requires --tmux." >&2
+  exit 1
+fi
+
+if [[ "$dry_run" -eq 1 ]]; then
+  print_plan "$start_step" "$max_steps"
+  if (( start_step > max_steps )); then
+    echo "No remaining steps to run."
+  fi
+  exit 0
+fi
+
+if [[ -n "$session_dir" ]]; then
+  write_run_metadata "$run_dir/meta"
+fi
+
+echo "Starting agent loop (mode=$mode)"
 if [[ -n "$session_dir" ]]; then
   echo "session_dir=$session_dir"
 fi
-echo "prompt_count=${#prompts[@]}"
+echo "prompt_count=${#prompt_values[@]}"
 echo "max_steps=$max_steps"
+if [[ "$mode" == "resume" ]]; then
+  echo "resume_from_step=$start_step"
+fi
 if [[ ${#agent_cmds[@]} -eq 1 ]]; then
   echo "agent_cmd=${agent_cmds[0]}"
 else
@@ -203,18 +611,26 @@ if [[ "$use_tmux" -eq 1 ]]; then
   echo "tmux_attach_cmd=tmux attach -t $tmux_attach_target"
 fi
 
-for ((step=1; step<=max_steps; step++)); do
-  prompt="${prompts[$(( (step - 1) % ${#prompts[@]} ))]}"
-  agent_cmd="${agent_cmds[$(( (step - 1) % ${#agent_cmds[@]} ))]}"
-  input_handoff=""
-  output_handoff=""
+if (( start_step > max_steps )); then
+  echo "No remaining steps to run."
+fi
+
+for ((step=start_step; step<=max_steps; step++)); do
+  resolve_step_context "$step"
+  prompt_kind="$step_prompt_kind"
+  prompt_value="$step_prompt_value"
+  prompt_label="$step_prompt_label"
+  agent_cmd="$step_agent_cmd"
+  compute_handoff_paths "$step"
+  input_handoff="$step_input_handoff"
+  output_handoff="$step_output_handoff"
   step_dir=""
   stdout_log=""
   stderr_log=""
 
   start_epoch="$(date +%s)"
   start_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  echo "[step $step] start prompt=$(basename "$prompt") time=$start_iso"
+  echo "[step $step] start prompt=$prompt_label time=$start_iso"
 
   if [[ -n "$session_dir" ]]; then
     step_dir="$(printf '%s/s%03d' "$run_dir" "$step")"
@@ -224,14 +640,12 @@ for ((step=1; step<=max_steps; step++)); do
     stderr_log="$step_dir/stderr.log"
     : > "$stdout_log"; : > "$stderr_log"
     if [[ "$handoff_enabled" -eq 1 ]]; then
-      if [[ $step -gt 1 ]]; then
-        prev_handoff="$(printf '%s/s%03d/handoff.md' "$run_dir" "$((step - 1))")"
-        [[ -f "$prev_handoff" ]] && input_handoff="$prev_handoff"
+      if [[ -n "$input_handoff" && ! -f "$input_handoff" ]]; then
+        input_handoff=""
       fi
-      output_handoff="$step_dir/handoff.md"
       : > "$output_handoff"
     fi
-    emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$prompt" > "$effective"
+    emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$prompt_kind" "$prompt_value" > "$effective"
     if [[ "$use_tmux" -eq 0 ]]; then
       set +e
       bash -c "$agent_cmd" < "$effective" > "$stdout_log" 2> "$stderr_log"
@@ -242,9 +656,11 @@ for ((step=1; step<=max_steps; step++)); do
   fi
 
   if [[ "$use_tmux" -eq 1 ]]; then
-    effective_prompt="$(emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$prompt")"
-    tmux_cmd="$(build_tmux_step_command "$effective_prompt" "$agent_cmd" "$stdout_log" "$stderr_log")"
-    window_name="$(build_tmux_window_name "$step" "$prompt")"
+    effective_prompt="$(emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$prompt_kind" "$prompt_value")"
+    window_name="$(build_tmux_window_name "$step" "$prompt_label")"
+    wait_channel="$(build_tmux_wait_channel "$tmux_session_name" "$window_name" "$step")"
+    active_tmux_exit_code_file="$(mktemp "${TMPDIR:-/tmp}/converge-tmux-exit.XXXXXX")"
+    tmux_cmd="$(build_tmux_step_command "$effective_prompt" "$agent_cmd" "$wait_channel" "$active_tmux_exit_code_file" "$stdout_log" "$stderr_log")"
     if [[ "$tmux_created" -eq 0 ]]; then
       tmux new-session -d -s "$tmux_session_name" -n "$window_name" bash -c "$tmux_cmd"
       configure_tmux_window "$tmux_session_name" "$window_name"
@@ -253,14 +669,18 @@ for ((step=1; step<=max_steps; step++)); do
       tmux new-window -d -t "$tmux_session_name" -n "$window_name" bash -c "$tmux_cmd"
       configure_tmux_window "$tmux_session_name" "$window_name"
     fi
-    code="$(wait_for_tmux_window "$tmux_session_name" "$window_name")"
-    [[ -n "$code" ]] || code=1
+    if wait_for_tmux_window "$wait_channel" "$active_tmux_exit_code_file"; then
+      code="$tmux_wait_code"
+    else
+      code=1
+    fi
+    cleanup_active_tmux_files
     if [[ -n "$step_dir" ]]; then
       printf '%s\n' "$code" > "$step_dir/exit_code.txt"
     fi
   elif [[ -z "$session_dir" ]]; then
     set +e
-    emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$prompt" | bash -c "$agent_cmd"
+    emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$prompt_kind" "$prompt_value" | bash -c "$agent_cmd"
     code=$?
     set -e
   fi
@@ -270,8 +690,12 @@ for ((step=1; step<=max_steps; step++)); do
   echo "[step $step] done exit=$code elapsed=${elapsed}s"
   if [[ -n "$loop_log" ]]; then
     printf '%s step=%d prompt=%s agent_cmd=%q exit=%d elapsed_s=%d\n' \
-      "$end_iso" "$step" "$prompt" "$agent_cmd" "$code" "$elapsed" >> "$loop_log"
+      "$end_iso" "$step" "$prompt_label" "$agent_cmd" "$code" "$elapsed" >> "$loop_log"
   fi
 done
+
+if [[ "$use_tmux" -eq 1 && "$tmux_cleanup" -eq 1 && -n "$tmux_session_name" ]]; then
+  tmux has-session -t "$tmux_session_name" >/dev/null 2>&1 && tmux kill-session -t "$tmux_session_name" >/dev/null 2>&1
+fi
 
 echo "Loop finished after $max_steps steps."
