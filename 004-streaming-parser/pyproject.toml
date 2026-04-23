@@ -1,0 +1,15 @@
+[project]
+name = "streaming-parser-examples"
+version = "0.1.0"
+description = "Streaming parser demos and property tests."
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.0.0",
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
