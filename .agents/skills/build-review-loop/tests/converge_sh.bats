@@ -681,6 +681,68 @@ EOF
   [[ "$(<"$session_dir/run/s004/stdout.log")" == *"run-4"* ]]
 }
 
+@test "resume accepts legacy sessions without run-to-completion metadata" {
+  session_dir="$TEST_ROOT/session"
+  agent_path="$BIN_DIR/agent"
+  make_agent "$agent_path" "legacy-ok"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 2 \
+    --no-handoff
+  [ "$status" -eq 0 ]
+
+  rm "$session_dir/run/meta/run_to_completion.txt"
+
+  run bash "$SCRIPT_PATH" resume \
+    --session-dir "$session_dir" \
+    --max-steps 4 \
+    --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"mode=resume"* ]]
+  [[ "$output" == *"start_step=3"* ]]
+  [[ "$output" == *"completion_mode=fixed_steps"* ]]
+}
+
+@test "resume treats zero-padded double-digit step directories as decimal" {
+  session_dir="$TEST_ROOT/session"
+  count_file="$TEST_ROOT/count.txt"
+  printf '0\n' > "$count_file"
+  agent_path="$BIN_DIR/agent"
+  cat > "$agent_path" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+cat >/dev/null
+count="\$(<"$count_file")"
+count=\$((count + 1))
+printf '%s\n' "\$count" > "$count_file"
+printf 'run-%s\n' "\$count"
+EOF
+  chmod +x "$agent_path"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 10 \
+    --no-handoff
+  [ "$status" -eq 0 ]
+  [ -f "$session_dir/run/s010/exit_code.txt" ]
+
+  run bash "$SCRIPT_PATH" resume \
+    --session-dir "$session_dir" \
+    --max-steps 12 \
+    --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"start_step=11"* ]]
+  [[ "$output" == *"[step 11]"* ]]
+  [[ "$output" == *"[step 12]"* ]]
+}
+
 @test "resume recomputes a trailing complete streak and stops after the next complete" {
   session_dir="$TEST_ROOT/session"
   sequence_file="$TEST_ROOT/judgements.txt"

@@ -258,7 +258,6 @@ load_run_metadata() {
   local cmds_file="$meta_dir/agent_cmds.txt"
   [[ -f "$meta_dir/max_steps.txt" ]] || { echo "Cannot resume: missing $meta_dir/max_steps.txt" >&2; exit 1; }
   [[ -f "$meta_dir/handoff_enabled.txt" ]] || { echo "Cannot resume: missing $meta_dir/handoff_enabled.txt" >&2; exit 1; }
-  [[ -f "$meta_dir/run_to_completion.txt" ]] || { echo "Cannot resume: missing $meta_dir/run_to_completion.txt" >&2; exit 1; }
   [[ -f "$meta_dir/use_tmux.txt" ]] || { echo "Cannot resume: missing $meta_dir/use_tmux.txt" >&2; exit 1; }
   [[ -f "$meta_dir/tmux_session_name.txt" ]] || { echo "Cannot resume: missing $meta_dir/tmux_session_name.txt" >&2; exit 1; }
   [[ -f "$prompts_file" ]] || { echo "Cannot resume: missing $prompts_file" >&2; exit 1; }
@@ -266,7 +265,11 @@ load_run_metadata() {
 
   stored_max_steps="$(<"$meta_dir/max_steps.txt")"
   handoff_enabled="$(<"$meta_dir/handoff_enabled.txt")"
-  run_to_completion="$(<"$meta_dir/run_to_completion.txt")"
+  if [[ -f "$meta_dir/run_to_completion.txt" ]]; then
+    run_to_completion="$(<"$meta_dir/run_to_completion.txt")"
+  else
+    run_to_completion=0
+  fi
   use_tmux="$(<"$meta_dir/use_tmux.txt")"
   if [[ -f "$meta_dir/tmux_cleanup.txt" ]]; then
     tmux_cleanup="$(<"$meta_dir/tmux_cleanup.txt")"
