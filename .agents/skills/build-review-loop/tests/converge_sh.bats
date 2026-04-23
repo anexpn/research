@@ -428,6 +428,81 @@ EOF
   [[ "$output" == *"completion_streak_target=2"* ]]
 }
 
+@test "dry run preserves a new session-dir path that does not exist yet" {
+  session_dir="$TEST_ROOT/nested/session/path"
+  expected_session_dir="$session_dir"
+  agent_path="$BIN_DIR/agent"
+  make_agent "$agent_path" "ok\n"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 1 \
+    --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"cd:"* ]]
+  [[ "$output" == *"session_dir=$expected_session_dir"* ]]
+  [[ "$output" == *"output_handoff=$expected_session_dir/run/s001/handoff.md"* ]]
+}
+
+@test "dry run normalizes relative session-dir dot components" {
+  cd "$TEST_ROOT"
+  session_dir="./session"
+  expected_session_dir="$TEST_ROOT/session"
+  agent_path="$BIN_DIR/agent"
+  make_agent "$agent_path" "ok\n"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 1 \
+    --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"session_dir=$expected_session_dir"* ]]
+  [[ "$output" == *"output_handoff=$expected_session_dir/run/s001/handoff.md"* ]]
+}
+
+@test "dry run normalizes relative session-dir parent components" {
+  cd "$TEST_ROOT"
+  session_dir="./nested/../session"
+  expected_session_dir="$TEST_ROOT/session"
+  agent_path="$BIN_DIR/agent"
+  make_agent "$agent_path" "ok\n"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 1 \
+    --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"session_dir=$expected_session_dir"* ]]
+  [[ "$output" == *"output_handoff=$expected_session_dir/run/s001/handoff.md"* ]]
+}
+
+@test "dry run normalizes absolute session-dir dot and parent components" {
+  session_dir="$TEST_ROOT/./nested/../session"
+  expected_session_dir="$TEST_ROOT/session"
+  agent_path="$BIN_DIR/agent"
+  make_agent "$agent_path" "ok\n"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 1 \
+    --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"session_dir=$expected_session_dir"* ]]
+  [[ "$output" == *"output_handoff=$expected_session_dir/run/s001/handoff.md"* ]]
+}
+
 @test "agent preset resolves in dry run" {
   run bash "$SCRIPT_PATH" run \
     --prompt-file "$PROMPT_DIR/builder.md" \

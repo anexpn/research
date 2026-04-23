@@ -86,6 +86,47 @@ resolve_file_path() {
   printf '%s/%s\n' "$(cd "$(dirname "$path")" && pwd)" "$(basename "$path")"
 }
 
+resolve_path_without_creation() {
+  local path="$1"
+  local IFS="/"
+  local -a parts=()
+  local -a normalized=()
+  local part
+  local normalized_count=0
+  local idx
+
+  if [[ "$path" != /* ]]; then
+    path="$PWD/$path"
+  fi
+
+  read -r -a parts <<< "$path"
+  for part in "${parts[@]}"; do
+    case "$part" in
+      ""|".")
+        ;;
+      "..")
+        if [[ "$normalized_count" -gt 0 ]]; then
+          normalized_count=$((normalized_count - 1))
+          unset "normalized[$normalized_count]"
+        fi
+        ;;
+      *)
+        normalized[$normalized_count]="$part"
+        normalized_count=$((normalized_count + 1))
+        ;;
+    esac
+  done
+
+  if [[ "$normalized_count" -eq 0 ]]; then
+    printf '/\n'
+    return
+  fi
+  for ((idx = 0; idx < normalized_count; idx++)); do
+    printf '/%s' "${normalized[$idx]}"
+  done
+  printf '\n'
+}
+
 sanitize_tmux_label() {
   local text="$1" fallback="$2" max_len="$3" safe
   safe="$(printf '%s' "$text" | tr -c 'A-Za-z0-9._-' '-' | sed 's/-\{2,\}/-/g; s/^-*//; s/-*$//')"
@@ -610,7 +651,7 @@ if [[ "$mode" == "run" ]]; then
   fi
   if [[ -n "$session_dir" ]]; then
     if [[ "$dry_run" -eq 1 ]]; then
-      session_dir="$(cd "$(dirname "$session_dir")" && pwd)/$(basename "$session_dir")"
+      session_dir="$(resolve_path_without_creation "$session_dir")"
     else
       session_dir="$(mkdir -p "$session_dir" && cd "$session_dir" && pwd)"
     fi
