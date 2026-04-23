@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build Review Loop"
+  short_description: "Run iterative builder-reviewer loops"
+  default_prompt: "Use $build-review-loop to turn this markdown build brief into Builder and Reviewer prompts plus a converge.sh command."

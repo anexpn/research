@@ -6,6 +6,7 @@ Build target: `{{BUILD_BRIEF_PATH}}`
 
 Read the build brief and inspect current workspace output.
 Evaluate correctness, regressions, and requirement coverage.
+{{ROLE_REQUIREMENTS_BLOCK}}
 Write a concise handoff with:
 
 - pass/fail verdict,
