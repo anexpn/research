@@ -10,5 +10,5 @@ Always pass `--git` when using `jj diff`.
 
 ### Paths
 
-- `<NNN>-<slug-of-the-idea>/`: root folder of a research idea.
-- `<NNN>-<slug-of-the-idea>/sessions/<XXX>-<slug-of-this-session>/`: AI session folder.
+- `ideas/<NNN>-<slug-of-the-idea>/`: root folder of a research idea.
+- `ideas/<NNN>-<slug-of-the-idea>/sessions/<XXX>-<slug-of-this-session>/`: AI session folder.
