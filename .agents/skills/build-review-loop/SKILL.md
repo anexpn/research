@@ -78,6 +78,7 @@ Prompt text must be concise and complete.
 - Tell, do not instruct.
 - Avoid policy chatter.
 - Keep each role focused on outcomes and artifacts.
+- Frame the build brief as implementation input, not as the artifact to rewrite, unless Human explicitly wants the brief updated.
 - Keep role-specific requirement text short and concrete.
 
 When Human wants stored prompt files, render them with the bundled helper instead of editing templates by hand:

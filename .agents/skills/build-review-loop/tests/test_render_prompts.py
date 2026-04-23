@@ -74,3 +74,15 @@ def test_render_prompts_omits_extra_requirements_block_when_none_are_set(tmp_pat
     assert str(brief_path.resolve()) in reviewer_text
     assert "Extra requirements:" not in builder_text
     assert "Extra requirements:" not in reviewer_text
+
+
+def test_render_prompts_builder_frames_brief_as_implementation_input(tmp_path: Path) -> None:
+    result, brief_path, builder_output, _ = run_render_prompts(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+
+    builder_text = builder_output.read_text(encoding="utf-8")
+
+    assert f"Implementation brief: `{brief_path.resolve()}`" in builder_text
+    assert "not as the artifact to rewrite" in builder_text
+    assert "unless the brief explicitly asks for its own update." in builder_text
