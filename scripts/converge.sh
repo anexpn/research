@@ -4,6 +4,7 @@ set -euo pipefail
 # File protocol (when --session-dir is set):
 # - <session-dir>/run/meta/max_steps.txt
 # - <session-dir>/run/meta/handoff_enabled.txt
+# - <session-dir>/run/meta/run_to_completion.txt
 # - <session-dir>/run/meta/use_tmux.txt
 # - <session-dir>/run/meta/tmux_cleanup.txt
 # - <session-dir>/run/meta/tmux_session_name.txt
@@ -39,6 +40,8 @@ RUN OPTIONS
 RUN OPTIONAL
   -s, --session-dir   Session root for run artifacts.
   -n, --max-steps     Number of loop iterations (default: 10).
+      --run-to-completion
+                  Stop early after 2 consecutive complete handoff judgements.
   -t, --tmux          Run each step in a tmux window for live observability.
   -x, --tmux-cleanup  Auto-kill tmux session when loop exits or is interrupted.
   -T, --tmux-session-name
@@ -121,6 +124,13 @@ emit_effective_prompt() {
   echo
   echo "- step: $step"
   echo "- agent_cmd: $agent_cmd"
+  if [[ "$run_to_completion" -eq 1 ]]; then
+    echo "- completion_mode: run_to_completion"
+    echo "- completion_streak_target: $completion_streak_target"
+    echo "- write YAML frontmatter to output_handoff with converge_work_judgement: complete|incomplete."
+    echo "- use complete only if the entire assignment appears finished and the loop should stop if the next step independently agrees."
+    echo "- use incomplete if any implementation, review, verification, or uncertainty remains."
+  fi
   if [[ -n "$output_handoff" ]]; then
     if [[ -n "$input_handoff" ]]; then
       echo "- input_handoff: $input_handoff"
@@ -154,7 +164,9 @@ build_tmux_step_command() {
   if [[ -n "$stdout_log" && -n "$stderr_log" ]]; then
     escaped_stdout="$(printf '%q' "$stdout_log")"
     escaped_stderr="$(printf '%q' "$stderr_log")"
-    command="$command > >(tee $escaped_stdout) 2> >(tee $escaped_stderr >&2)"
+    printf "set -o pipefail; stdout_fifo=\$(mktemp -u); stderr_fifo=\$(mktemp -u); mkfifo \"\$stdout_fifo\" \"\$stderr_fifo\"; tee %s < \"\$stdout_fifo\" & tee_stdout_pid=\$!; tee %s < \"\$stderr_fifo\" >&2 & tee_stderr_pid=\$!; %s > \"\$stdout_fifo\" 2> \"\$stderr_fifo\"; code=\$?; wait \"\$tee_stdout_pid\" \"\$tee_stderr_pid\"; rm -f \"\$stdout_fifo\" \"\$stderr_fifo\"; printf '%%s\\n' \"\$code\" > %s; tmux wait-for -S %s; exit \"\$code\"\n" \
+      "$escaped_stdout" "$escaped_stderr" "$command" "$escaped_exit_code_file" "$escaped_wait_channel"
+    return
   fi
   printf "set -o pipefail; %s; code=\$?; printf '%%s\\n' \"\$code\" > %s; tmux wait-for -S %s; exit \"\$code\"\n" \
     "$command" "$escaped_exit_code_file" "$escaped_wait_channel"
@@ -228,6 +240,7 @@ write_run_metadata() {
   mkdir -p "$meta_dir"
   printf '%s\n' "$max_steps" > "$meta_dir/max_steps.txt"
   printf '%s\n' "$handoff_enabled" > "$meta_dir/handoff_enabled.txt"
+  printf '%s\n' "$run_to_completion" > "$meta_dir/run_to_completion.txt"
   printf '%s\n' "$use_tmux" > "$meta_dir/use_tmux.txt"
   printf '%s\n' "$tmux_cleanup" > "$meta_dir/tmux_cleanup.txt"
   printf '%s\n' "$tmux_session_name_requested" > "$meta_dir/tmux_session_name.txt"
@@ -245,6 +258,7 @@ load_run_metadata() {
   local cmds_file="$meta_dir/agent_cmds.txt"
   [[ -f "$meta_dir/max_steps.txt" ]] || { echo "Cannot resume: missing $meta_dir/max_steps.txt" >&2; exit 1; }
   [[ -f "$meta_dir/handoff_enabled.txt" ]] || { echo "Cannot resume: missing $meta_dir/handoff_enabled.txt" >&2; exit 1; }
+  [[ -f "$meta_dir/run_to_completion.txt" ]] || { echo "Cannot resume: missing $meta_dir/run_to_completion.txt" >&2; exit 1; }
   [[ -f "$meta_dir/use_tmux.txt" ]] || { echo "Cannot resume: missing $meta_dir/use_tmux.txt" >&2; exit 1; }
   [[ -f "$meta_dir/tmux_session_name.txt" ]] || { echo "Cannot resume: missing $meta_dir/tmux_session_name.txt" >&2; exit 1; }
   [[ -f "$prompts_file" ]] || { echo "Cannot resume: missing $prompts_file" >&2; exit 1; }
@@ -252,6 +266,7 @@ load_run_metadata() {
 
   stored_max_steps="$(<"$meta_dir/max_steps.txt")"
   handoff_enabled="$(<"$meta_dir/handoff_enabled.txt")"
+  run_to_completion="$(<"$meta_dir/run_to_completion.txt")"
   use_tmux="$(<"$meta_dir/use_tmux.txt")"
   if [[ -f "$meta_dir/tmux_cleanup.txt" ]]; then
     tmux_cleanup="$(<"$meta_dir/tmux_cleanup.txt")"
@@ -261,6 +276,7 @@ load_run_metadata() {
   tmux_session_name_requested="$(<"$meta_dir/tmux_session_name.txt")"
   [[ "$stored_max_steps" =~ ^[0-9]+$ && "$stored_max_steps" -gt 0 ]] || { echo "Invalid stored max steps: $stored_max_steps" >&2; exit 1; }
   [[ "$handoff_enabled" =~ ^[01]$ ]] || { echo "Invalid stored handoff flag: $handoff_enabled" >&2; exit 1; }
+  [[ "$run_to_completion" =~ ^[01]$ ]] || { echo "Invalid stored run-to-completion flag: $run_to_completion" >&2; exit 1; }
   [[ "$use_tmux" =~ ^[01]$ ]] || { echo "Invalid stored tmux flag: $use_tmux" >&2; exit 1; }
   [[ "$tmux_cleanup" =~ ^[01]$ ]] || { echo "Invalid stored tmux cleanup flag: $tmux_cleanup" >&2; exit 1; }
 
@@ -352,6 +368,7 @@ find_last_completed_step() {
     stem="$(basename "$step_dir")"
     num="${stem#s}"
     [[ "$num" =~ ^[0-9]+$ ]] || continue
+    num="$((10#$num))"
     (( num > last )) && last="$num"
   done
   printf '%s\n' "$last"
@@ -378,6 +395,65 @@ compute_handoff_paths() {
   fi
 }
 
+parse_handoff_judgement() {
+  local handoff_path="$1" line judgement="" in_frontmatter=0
+  parsed_completion_judgement=""
+  [[ -f "$handoff_path" ]] || return 0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$in_frontmatter" -eq 0 ]]; then
+      [[ "$line" == "---" ]] || return 0
+      in_frontmatter=1
+      continue
+    fi
+    [[ "$line" == "---" ]] && break
+    case "$line" in
+      converge_work_judgement:*)
+        judgement="${line#converge_work_judgement:}"
+        judgement="$(printf '%s' "$judgement" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        ;;
+    esac
+  done < "$handoff_path"
+
+  case "$judgement" in
+    complete|incomplete) parsed_completion_judgement="$judgement" ;;
+    *) parsed_completion_judgement="" ;;
+  esac
+}
+
+recompute_completion_streak() {
+  local root="$1" last_step="$2" step handoff_path
+  completion_streak=0
+  for ((step=last_step; step>=1; step--)); do
+    handoff_path="$(printf '%s/s%03d/handoff.md' "$root" "$step")"
+    parse_handoff_judgement "$handoff_path"
+    if [[ "$parsed_completion_judgement" == "complete" ]]; then
+      completion_streak=$((completion_streak + 1))
+    else
+      break
+    fi
+  done
+}
+
+record_step_completion_state() {
+  local handoff_path="$1"
+  parse_handoff_judgement "$handoff_path"
+  case "$parsed_completion_judgement" in
+    complete)
+      current_completion_judgement="complete"
+      completion_streak=$((completion_streak + 1))
+      ;;
+    incomplete)
+      current_completion_judgement="incomplete"
+      completion_streak=0
+      ;;
+    *)
+      current_completion_judgement="missing"
+      completion_streak=0
+      ;;
+  esac
+}
+
 print_plan() {
   local start_step="$1" end_step="$2"
   local step input_handoff output_handoff
@@ -388,6 +464,12 @@ print_plan() {
   echo "max_steps=$end_step"
   echo "prompt_count=${#prompt_values[@]}"
   echo "agent_cmd_count=${#agent_cmds[@]}"
+  if [[ "$run_to_completion" -eq 1 ]]; then
+    echo "completion_mode=run_to_completion"
+    echo "completion_streak_target=$completion_streak_target"
+  else
+    echo "completion_mode=fixed_steps"
+  fi
   for ((step=start_step; step<=end_step; step++)); do
     resolve_step_context "$step"
     compute_handoff_paths "$step"
@@ -431,9 +513,13 @@ if [[ $# -gt 0 ]]; then
 fi
 
 session_dir="" max_steps=10 use_tmux=0 tmux_cleanup=0 tmux_session_name="" tmux_session_name_requested="" tmux_created=0 handoff_disabled=0
+run_to_completion=0 completion_streak_target=2 completion_streak=0
 active_tmux_exit_code_file=""
 active_tmux_wait_pid=""
 tmux_wait_code=""
+current_completion_judgement=""
+parsed_completion_judgement=""
+completed_steps=0
 dry_run=0
 cli_prompt_kinds=()
 cli_prompt_values=()
@@ -455,7 +541,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -d|--dry-run) dry_run=1; shift ;;
-    -p|--prompt|-f|--prompt-file|-a|--agent-cmd|-A|--agent-preset|-t|--tmux|-x|--tmux-cleanup|-T|--tmux-session-name|-H|--no-handoff)
+    -p|--prompt|-f|--prompt-file|-a|--agent-cmd|-A|--agent-preset|--run-to-completion|-t|--tmux|-x|--tmux-cleanup|-T|--tmux-session-name|-H|--no-handoff)
       if [[ "$mode" == "resume" ]]; then
         echo "resume only accepts -s/--session-dir, -n/--max-steps, and -d/--dry-run." >&2
         exit 1
@@ -481,6 +567,7 @@ while [[ $# -gt 0 ]]; do
           agent_cmds+=("$(agent_preset_command "$preset")")
           shift 2
           ;;
+        --run-to-completion) run_to_completion=1; shift ;;
         -t|--tmux) use_tmux=1; shift ;;
         -x|--tmux-cleanup) tmux_cleanup=1; shift ;;
         -T|--tmux-session-name) tmux_session_name_requested="${2:-}"; shift 2 ;;
@@ -552,6 +639,15 @@ else
   [[ ${#agent_cmds[@]} -gt 0 ]] || { echo "Cannot resume: no stored agent commands found." >&2; exit 1; }
 fi
 
+if [[ "$run_to_completion" -eq 1 && -z "$session_dir" ]]; then
+  echo "--run-to-completion requires --session-dir." >&2
+  exit 1
+fi
+if [[ "$run_to_completion" -eq 1 && "$handoff_enabled" -eq 0 ]]; then
+  echo "--run-to-completion requires handoff mode; remove --no-handoff." >&2
+  exit 1
+fi
+
 run_dir=""
 loop_log=""
 if [[ -n "$session_dir" ]]; then
@@ -597,6 +693,12 @@ if [[ -n "$session_dir" ]]; then
 fi
 echo "prompt_count=${#prompt_values[@]}"
 echo "max_steps=$max_steps"
+if [[ "$run_to_completion" -eq 1 ]]; then
+  echo "completion_mode=run_to_completion"
+  echo "completion_streak_target=$completion_streak_target"
+else
+  echo "completion_mode=fixed_steps"
+fi
 if [[ "$mode" == "resume" ]]; then
   echo "resume_from_step=$start_step"
 fi
@@ -609,6 +711,14 @@ if [[ "$use_tmux" -eq 1 ]]; then
   printf -v tmux_attach_target '%q' "$tmux_session_name"
   echo "tmux_session=$tmux_session_name"
   echo "tmux_attach_cmd=tmux attach -t $tmux_attach_target"
+fi
+
+if [[ "$mode" == "resume" && "$run_to_completion" -eq 1 ]]; then
+  recompute_completion_streak "$run_dir" "$last_completed_step"
+  if (( completion_streak >= completion_streak_target )); then
+    echo "Completion already confirmed at step $last_completed_step; no remaining steps to run."
+    exit 0
+  fi
 fi
 
 if (( start_step > max_steps )); then
@@ -688,9 +798,23 @@ for ((step=start_step; step<=max_steps; step++)); do
   end_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   elapsed=$(( $(date +%s) - start_epoch ))
   echo "[step $step] done exit=$code elapsed=${elapsed}s"
+  completed_steps=$((completed_steps + 1))
+  if [[ "$run_to_completion" -eq 1 ]]; then
+    record_step_completion_state "$output_handoff"
+    echo "completion_judgement=$current_completion_judgement streak=${completion_streak}/${completion_streak_target}"
+  fi
   if [[ -n "$loop_log" ]]; then
-    printf '%s step=%d prompt=%s agent_cmd=%q exit=%d elapsed_s=%d\n' \
-      "$end_iso" "$step" "$prompt_label" "$agent_cmd" "$code" "$elapsed" >> "$loop_log"
+    if [[ "$run_to_completion" -eq 1 ]]; then
+      printf '%s step=%d prompt=%s agent_cmd=%q exit=%d elapsed_s=%d completion_judgement=%s completion_streak=%d/%d\n' \
+        "$end_iso" "$step" "$prompt_label" "$agent_cmd" "$code" "$elapsed" "$current_completion_judgement" "$completion_streak" "$completion_streak_target" >> "$loop_log"
+    else
+      printf '%s step=%d prompt=%s agent_cmd=%q exit=%d elapsed_s=%d\n' \
+        "$end_iso" "$step" "$prompt_label" "$agent_cmd" "$code" "$elapsed" >> "$loop_log"
+    fi
+  fi
+  if [[ "$run_to_completion" -eq 1 && "$completion_streak" -ge "$completion_streak_target" ]]; then
+    echo "Completion confirmed at step $step after $completion_streak_target consecutive complete judgements."
+    break
   fi
 done
 
@@ -698,4 +822,4 @@ if [[ "$use_tmux" -eq 1 && "$tmux_cleanup" -eq 1 && -n "$tmux_session_name" ]]; 
   tmux has-session -t "$tmux_session_name" >/dev/null 2>&1 && tmux kill-session -t "$tmux_session_name" >/dev/null 2>&1
 fi
 
-echo "Loop finished after $max_steps steps."
+echo "Loop finished after $completed_steps executed steps."

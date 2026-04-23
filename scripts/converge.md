@@ -1,6 +1,6 @@
 # converge
 
-`scripts/converge.sh` is a shell-based converging loop runner with optional session artifacts, handoff files, `tmux` observability, and resumable runs.
+`scripts/converge.sh` is a shell-based converging loop runner with optional session artifacts, handoff files, run-to-completion stopping, `tmux` observability, and resumable runs.
 
 ## Usage
 
@@ -69,6 +69,22 @@ These are intended for automated loop runs. `bypassPermissions` and `--yolo` are
   --max-steps 10
 ```
 
+### Run until work completion is confirmed
+
+```bash
+./scripts/converge.sh run \
+  --session-dir ./tmp/session-a \
+  --prompt-file ./tmp/prompts/builder.md \
+  --prompt-file ./tmp/prompts/reviewer.md \
+  --agent-preset codex \
+  --max-steps 10 \
+  --run-to-completion
+```
+
+- `--run-to-completion` requires `--session-dir` and handoff mode.
+- `--max-steps` remains the hard ceiling.
+- The runner stops early only after two consecutive `complete` judgements.
+
 ## Prompt rotation
 
 - Prompts rotate by step based on repeated `--prompt` and/or `--prompt-file` flags.
@@ -84,6 +100,12 @@ Always included:
 - `step`
 - `agent_cmd`
 
+Included when `--run-to-completion` is enabled:
+
+- `completion_mode`
+- `completion_streak_target`
+- instructions to write YAML frontmatter with `converge_work_judgement: complete|incomplete`
+
 Included when handoff is enabled:
 
 - `input_handoff`
@@ -94,6 +116,21 @@ Handoff mode:
 - default: enabled when `--session-dir` is present
 - disabled when no `--session-dir` is provided
 - `--no-handoff` disables handoff even with a session dir
+- `--run-to-completion` requires handoff to remain enabled
+
+Run-to-completion handoff contract:
+
+```md
+---
+converge_work_judgement: complete
+converge_reason: all requested work is finished
+---
+```
+
+- `converge_work_judgement` is required when `--run-to-completion` is enabled.
+- Allowed values are `complete` and `incomplete`.
+- `complete` means the entire converge assignment appears finished, not merely the current step.
+- Missing or malformed frontmatter is treated as a non-fatal missing judgement and resets the completion streak.
 
 ## Artifacts
 
@@ -103,6 +140,7 @@ Without `--session-dir`:
 
 With `--session-dir`:
 
+- `<session-dir>/run/meta/run_to_completion.txt`
 - `<session-dir>/run/sNNN/effective_prompt.md`
 - `<session-dir>/run/sNNN/stdout.log`
 - `<session-dir>/run/sNNN/stderr.log`
@@ -113,7 +151,13 @@ With handoff enabled:
 
 - `<session-dir>/run/sNNN/handoff.md`
 
-`loop.log` records one line per step including timestamp, step, prompt path, quoted `agent_cmd`, exit code, and elapsed seconds.
+`loop.log` records one line per step including timestamp, step, prompt path, quoted `agent_cmd`, exit code, and elapsed seconds. When `--run-to-completion` is enabled, it also records `completion_judgement` and `completion_streak`.
+
+## Resume behavior
+
+- `resume` inherits the stored run-to-completion mode from the original run.
+- On resume, the runner recomputes the trailing completion streak from completed handoffs.
+- If the stored run already ended with two trailing `complete` judgements, `resume` exits immediately without running another step.
 
 ## Optional tmux mode
 
@@ -131,8 +175,7 @@ With handoff enabled:
 - `run` (default when omitted):
   - Prompt inputs: `--prompt`, `--prompt-file` (both repeatable)
   - Agent inputs: `--agent-cmd`, `--agent-preset` (all repeatable)
-  - Optional: `--session-dir`, `--no-handoff`, `--max-steps` (default `10`), `--tmux`, `--tmux-cleanup`, `--tmux-session-name`, `--dry-run`
+  - Optional: `--session-dir`, `--no-handoff`, `--run-to-completion`, `--max-steps` (default `10`), `--tmux`, `--tmux-cleanup`, `--tmux-session-name`, `--dry-run`
 - `resume`:
   - Required: `--session-dir`
   - Optional: `--max-steps` (only supported reassignment on resume), `--dry-run`
-

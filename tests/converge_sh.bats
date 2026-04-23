@@ -37,6 +37,58 @@ EOF
   chmod +x "$path"
 }
 
+make_sequence_handoff_agent() {
+  local path="$1"
+  local sequence_file="$2"
+  local count_file="$3"
+
+  cat > "$path" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+payload="\$(cat)"
+output_handoff="\$(printf '%s\n' "\$payload" | awk -F': ' '/^- output_handoff:/ { print \$2; exit }')"
+count=0
+if [[ -f "$count_file" ]]; then
+  count="\$(<"$count_file")"
+fi
+count=\$((count + 1))
+printf '%s\n' "\$count" > "$count_file"
+judgement="\$(sed -n "\${count}p" "$sequence_file")"
+
+case "\$judgement" in
+  complete|incomplete)
+    cat > "\$output_handoff" <<HANDOFF
+---
+converge_work_judgement: \$judgement
+converge_reason: scripted-\$judgement-step-\$count
+---
+
+Step \$count handoff body.
+HANDOFF
+    ;;
+  malformed)
+    cat > "\$output_handoff" <<HANDOFF
+---
+converge_work_judgement: maybe
+---
+
+Malformed handoff body.
+HANDOFF
+    ;;
+  missing)
+    : > "\$output_handoff"
+    ;;
+  *)
+    echo "Unknown judgement: \$judgement" >&2
+    exit 1
+    ;;
+esac
+
+printf 'agent-step-%s\n' "\$count"
+EOF
+  chmod +x "$path"
+}
+
 make_fake_tmux() {
   local tmux_path="$BIN_DIR/tmux"
   cat > "$tmux_path" <<'EOF'
@@ -327,6 +379,55 @@ EOF
   [ ! -f "$marker" ]
 }
 
+@test "rejects --run-to-completion without session dir" {
+  agent_path="$BIN_DIR/agent"
+  make_agent "$agent_path" "ok\n"
+
+  run bash "$SCRIPT_PATH" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 2 \
+    --run-to-completion
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--run-to-completion requires --session-dir."* ]]
+}
+
+@test "rejects --run-to-completion when handoff is disabled" {
+  session_dir="$TEST_ROOT/session"
+  agent_path="$BIN_DIR/agent"
+  make_agent "$agent_path" "ok\n"
+
+  run bash "$SCRIPT_PATH" \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 2 \
+    --no-handoff \
+    --run-to-completion
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--run-to-completion requires handoff mode; remove --no-handoff."* ]]
+}
+
+@test "dry run prints run-to-completion mode and streak target" {
+  session_dir="$TEST_ROOT/session"
+  agent_path="$BIN_DIR/agent"
+  make_agent "$agent_path" "ok\n"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 3 \
+    --run-to-completion \
+    --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"completion_mode=run_to_completion"* ]]
+  [[ "$output" == *"completion_streak_target=2"* ]]
+}
+
 @test "agent preset resolves in dry run" {
   run bash "$SCRIPT_PATH" run \
     --prompt-file "$PROMPT_DIR/builder.md" \
@@ -416,6 +517,76 @@ EOF
   prompt_one="$(<"$session_dir/run/s001/effective_prompt.md")"
   [[ "$prompt_one" != *"input_handoff:"* ]]
   [[ "$prompt_one" != *"output_handoff:"* ]]
+}
+
+@test "--run-to-completion stops after two consecutive complete judgements" {
+  session_dir="$TEST_ROOT/session"
+  sequence_file="$TEST_ROOT/judgements.txt"
+  count_file="$TEST_ROOT/count.txt"
+  agent_path="$BIN_DIR/agent"
+  printf 'complete\ncomplete\ncomplete\n' > "$sequence_file"
+  printf '0\n' > "$count_file"
+  make_sequence_handoff_agent "$agent_path" "$sequence_file" "$count_file"
+
+  run bash "$SCRIPT_PATH" \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 5 \
+    --run-to-completion
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Completion confirmed at step 2 after 2 consecutive complete judgements."* ]]
+  [[ "$output" == *"Loop finished after 2 executed steps."* ]]
+  [ -f "$session_dir/run/s002/exit_code.txt" ]
+  [ ! -e "$session_dir/run/s003/exit_code.txt" ]
+  [[ "$(<"$session_dir/run/s001/effective_prompt.md")" == *"completion_mode: run_to_completion"* ]]
+  [[ "$(<"$session_dir/run/s001/effective_prompt.md")" == *"converge_work_judgement: complete|incomplete"* ]]
+  [[ "$(<"$session_dir/run/loop/loop.log")" == *"completion_judgement=complete completion_streak=2/2"* ]]
+}
+
+@test "incomplete judgement resets the completion streak" {
+  session_dir="$TEST_ROOT/session"
+  sequence_file="$TEST_ROOT/judgements.txt"
+  count_file="$TEST_ROOT/count.txt"
+  agent_path="$BIN_DIR/agent"
+  printf 'complete\nincomplete\ncomplete\ncomplete\n' > "$sequence_file"
+  printf '0\n' > "$count_file"
+  make_sequence_handoff_agent "$agent_path" "$sequence_file" "$count_file"
+
+  run bash "$SCRIPT_PATH" \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 5 \
+    --run-to-completion
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Completion confirmed at step 4 after 2 consecutive complete judgements."* ]]
+  [ -f "$session_dir/run/s004/exit_code.txt" ]
+  [ ! -e "$session_dir/run/s005/exit_code.txt" ]
+  [[ "$(<"$session_dir/run/loop/loop.log")" == *"completion_judgement=incomplete completion_streak=0/2"* ]]
+}
+
+@test "missing or malformed completion judgement is treated as incomplete" {
+  session_dir="$TEST_ROOT/session"
+  sequence_file="$TEST_ROOT/judgements.txt"
+  count_file="$TEST_ROOT/count.txt"
+  agent_path="$BIN_DIR/agent"
+  printf 'malformed\nmissing\ncomplete\ncomplete\n' > "$sequence_file"
+  printf '0\n' > "$count_file"
+  make_sequence_handoff_agent "$agent_path" "$sequence_file" "$count_file"
+
+  run bash "$SCRIPT_PATH" \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 5 \
+    --run-to-completion
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Completion confirmed at step 4 after 2 consecutive complete judgements."* ]]
+  [[ "$(<"$session_dir/run/loop/loop.log")" == *"completion_judgement=missing completion_streak=0/2"* ]]
 }
 
 @test "rotates prompts and agent commands independently across steps" {
@@ -508,6 +679,62 @@ EOF
   [ -f "$session_dir/run/s004/exit_code.txt" ]
   [[ "$(<"$session_dir/run/s003/stdout.log")" == *"run-3"* ]]
   [[ "$(<"$session_dir/run/s004/stdout.log")" == *"run-4"* ]]
+}
+
+@test "resume recomputes a trailing complete streak and stops after the next complete" {
+  session_dir="$TEST_ROOT/session"
+  sequence_file="$TEST_ROOT/judgements.txt"
+  count_file="$TEST_ROOT/count.txt"
+  agent_path="$BIN_DIR/agent"
+  printf 'incomplete\ncomplete\ncomplete\ncomplete\n' > "$sequence_file"
+  printf '0\n' > "$count_file"
+  make_sequence_handoff_agent "$agent_path" "$sequence_file" "$count_file"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 2 \
+    --run-to-completion
+  [ "$status" -eq 0 ]
+  [ -f "$session_dir/run/s002/exit_code.txt" ]
+
+  run bash "$SCRIPT_PATH" resume \
+    --session-dir "$session_dir" \
+    --max-steps 5
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"resume_from_step=3"* ]]
+  [[ "$output" == *"Completion confirmed at step 3 after 2 consecutive complete judgements."* ]]
+  [ -f "$session_dir/run/s003/exit_code.txt" ]
+  [ ! -e "$session_dir/run/s004/exit_code.txt" ]
+}
+
+@test "resume exits immediately when completion was already confirmed" {
+  session_dir="$TEST_ROOT/session"
+  sequence_file="$TEST_ROOT/judgements.txt"
+  count_file="$TEST_ROOT/count.txt"
+  agent_path="$BIN_DIR/agent"
+  printf 'complete\ncomplete\ncomplete\n' > "$sequence_file"
+  printf '0\n' > "$count_file"
+  make_sequence_handoff_agent "$agent_path" "$sequence_file" "$count_file"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 5 \
+    --run-to-completion
+  [ "$status" -eq 0 ]
+  [ -f "$session_dir/run/s002/exit_code.txt" ]
+  [ ! -e "$session_dir/run/s003/exit_code.txt" ]
+
+  run bash "$SCRIPT_PATH" resume \
+    --session-dir "$session_dir" \
+    --max-steps 5
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Completion already confirmed at step 2; no remaining steps to run."* ]]
 }
 
 @test "tmux mode fails clearly when tmux is unavailable" {
@@ -645,4 +872,3 @@ EOF
   [[ "$output" == *"Ctrl-C received; forcing quit now."* ]]
   [ ! -f "$fake_tmux_root/sessions/cleanup-on-interrupt" ]
 }
-
