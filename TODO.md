@@ -1,0 +1,10 @@
+- [ ] a skill that helps designing complete test suite for a design
+  - different test levels
+  - property tests
+  - mutation tests
+- [ ] optimize build-review-loop
+  - converge speed
+  - review quality
+  - UX
+  - with verification suite
+- [ ] build skill-swe-bench
