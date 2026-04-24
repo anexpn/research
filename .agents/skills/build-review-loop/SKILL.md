@@ -33,7 +33,7 @@ Use this skill to run a two-role rotating loop with the bundled prompts, `script
   - `build-review-loop.reviewer.prompt.md`
 - Use one agent source for both roles.
 - Use `--max-steps 10`.
-- Use session dir `build-review-loop.session` next to the design spec.
+- Use session storage with `converge.sh`'s default temp session dir.
 - Keep `--tmux`, `--tmux-cleanup`, `--tmux-session-name`, and `--dry-run` unset unless Human explicitly asks for them.
 - Leave Builder and Reviewer special requirements empty unless Human selects them.
 
@@ -62,7 +62,7 @@ Use this skill to run a two-role rotating loop with the bundled prompts, `script
    - `Provide a custom agent command`
 6. If Human selected `Provide a custom agent command`, ask only for the command string for the relevant role.
 7. If Human selected `Choose a different session directory`, ask this exact three-option question:
-   - `Use this session directory: <design-spec-dir>/build-review-loop.session`
+   - `Use the default temp session directory`
    - `Use a different session directory`
    - `Do not use a session directory`
    Ask for a free-text path only if Human chooses `Use a different session directory`.
@@ -106,7 +106,8 @@ If Human chose not to store prompt files, do not write them. Use that mode only 
 
 - Use `-A` for presets and `-a` for custom commands.
 - Rotate Builder then Reviewer prompt sources in order.
-- Use `-s` only when a session dir is enabled.
+- Use `-s` only when a custom session dir is enabled.
+- Use `--no-session-dir` when Human explicitly chose not to use a session directory.
 - Use `-n` only when the step count differs from the script default or when showing the chosen explicit value helps clarity.
 - Keep tmux-related flags at defaults unless Human explicitly asked for them.
 - For risk review, resolve every selected preset to its concrete agent command before deciding whether the run is safe enough to present without caveat. Do not treat a raw `-A <preset>` token as evidence that no risky flags are present.
@@ -119,11 +120,10 @@ bash .agents/skills/build-review-loop/scripts/converge.sh run \
   -A codex \
   -f "<design-spec-dir>/build-review-loop.builder.prompt.md" \
   -f "<design-spec-dir>/build-review-loop.reviewer.prompt.md" \
-  -s "<design-spec-dir>/build-review-loop.session" \
   -n 10
 ```
 
-If the chosen session dir already contains `run/meta`, prefer `converge.sh resume -s "<session-dir>"` instead of starting a fresh run. Ask for a larger `--max-steps` value only when Human wants to continue beyond the stored total.
+If Human chose a custom session dir and it already contains `run/meta`, prefer `converge.sh resume -s "<session-dir>"` instead of starting a fresh run. Ask for a larger `--max-steps` value only when Human wants to continue beyond the stored total.
 
 ## Call out risky flags
 

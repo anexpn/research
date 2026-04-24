@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# File protocol (when --session-dir is set):
+# File protocol (when session storage is enabled):
 # - <session-dir>/run/meta/max_steps.txt
 # - <session-dir>/run/meta/handoff_enabled.txt
 # - <session-dir>/run/meta/run_to_completion.txt
@@ -16,9 +16,13 @@ set -euo pipefail
 # - <session-dir>/run/sNNN/stderr.log
 # - <session-dir>/run/sNNN/exit_code.txt
 # - <session-dir>/run/sNNN/handoff.md (only when handoff is enabled)
+# Session storage defaults:
+# - enabled with a temp dir
+# - overridden with --session-dir
+# - disabled with --no-session-dir
 # Handoff defaults:
-# - enabled with --session-dir
-# - disabled without --session-dir or with --no-handoff
+# - enabled when session storage is enabled
+# - disabled with --no-session-dir or --no-handoff
 
 usage() {
   cat <<'EOF'
@@ -38,7 +42,9 @@ RUN OPTIONS
     -A, --agent-preset  Agent preset name (codex, claude, cursor-agent), repeatable.
 
 RUN OPTIONAL
-  -s, --session-dir   Session root for run artifacts.
+  -s, --session-dir   Session root for run artifacts. Defaults to a new temp dir.
+      --no-session-dir
+                  Disable session storage and run artifacts.
   -n, --max-steps     Number of loop iterations (default: 10).
       --run-to-completion
                   Stop early after 2 consecutive complete handoff judgements.
@@ -46,7 +52,7 @@ RUN OPTIONAL
   -x, --tmux-cleanup  Auto-kill tmux session when loop exits or is interrupted.
   -T, --tmux-session-name
                   Optional tmux session name override.
-  -H, --no-handoff    Disable handoff artifacts (enabled by default with --session-dir).
+  -H, --no-handoff    Disable handoff artifacts while keeping the session folder.
   -d, --dry-run       Print resolved execution plan and exit.
 
 RESUME OPTIONS
@@ -59,6 +65,7 @@ RESUME OPTIONS
 EXAMPLES
   converge.sh run -A codex -p "You are builder" -f ./prompts/inspector.md -n 2
   converge.sh run -a "claude -p --permission-mode bypassPermissions" -s ./session -f ./prompts/judge.md -H
+  converge.sh run -A codex -f ./prompts/builder.md --no-session-dir
   converge.sh resume -s ./session -n 12
 EOF
 }
@@ -125,6 +132,18 @@ resolve_path_without_creation() {
     printf '/%s' "${normalized[$idx]}"
   done
   printf '\n'
+}
+
+build_default_session_dir() {
+  local create="$1" tmp_root
+  tmp_root="${TMPDIR:-/tmp}"
+  tmp_root="${tmp_root%/}"
+  if [[ "$create" -eq 1 ]]; then
+    mktemp -d "$tmp_root/converge-session.XXXXXX"
+    return
+  fi
+  tmp_root="$(resolve_path_without_creation "$tmp_root")"
+  printf '%s/converge-session.dry-run.%d\n' "$tmp_root" "$$"
 }
 
 sanitize_tmux_label() {
@@ -194,6 +213,27 @@ emit_effective_prompt() {
   else
     printf '%s\n' "$prompt_value"
   fi
+}
+
+run_agent_with_logs() {
+  local agent_cmd="$1" effective_prompt="$2" stdout_log="$3" stderr_log="$4"
+  local stdout_fifo stderr_fifo tee_stdout_pid tee_stderr_pid code
+
+  stdout_fifo="$(mktemp -u "${TMPDIR:-/tmp}/converge-stdout.XXXXXX")"
+  stderr_fifo="$(mktemp -u "${TMPDIR:-/tmp}/converge-stderr.XXXXXX")"
+  mkfifo "$stdout_fifo" "$stderr_fifo"
+  tee "$stdout_log" < "$stdout_fifo" &
+  tee_stdout_pid=$!
+  tee "$stderr_log" < "$stderr_fifo" >&2 &
+  tee_stderr_pid=$!
+
+  bash -c "$agent_cmd" < "$effective_prompt" > "$stdout_fifo" 2> "$stderr_fifo"
+  code=$?
+
+  wait "$tee_stdout_pid"
+  wait "$tee_stderr_pid"
+  rm -f "$stdout_fifo" "$stderr_fifo"
+  return "$code"
 }
 
 build_tmux_step_command() {
@@ -559,6 +599,7 @@ if [[ $# -gt 0 ]]; then
 fi
 
 session_dir="" max_steps=10 use_tmux=0 tmux_cleanup=0 tmux_session_name="" tmux_session_name_requested="" tmux_created=0 handoff_disabled=0
+session_dir_mode="auto"
 run_to_completion=0 completion_streak_target=2 completion_streak=0
 active_tmux_exit_code_file=""
 active_tmux_wait_pid=""
@@ -577,7 +618,16 @@ trap 'handle_sigterm' TERM
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -s|--session-dir) session_dir="${2:-}"; shift 2 ;;
+    -s|--session-dir)
+      session_dir="${2:-}"
+      session_dir_mode="custom"
+      shift 2
+      ;;
+    --no-session-dir)
+      session_dir=""
+      session_dir_mode="disabled"
+      shift
+      ;;
     -n|--max-steps)
       if [[ "$mode" == "resume" ]]; then
         resume_max_steps="${2:-}"
@@ -646,12 +696,23 @@ if [[ "$mode" == "run" ]]; then
     [[ -n "$agent_cmd" ]] || { echo "--agent-cmd requires a non-empty value." >&2; exit 1; }
   done
   validate_cli_prompts
-  if [[ -n "$session_dir" && "$handoff_disabled" -eq 0 ]]; then
+  if [[ "$session_dir_mode" == "custom" ]]; then
+    [[ -n "$session_dir" ]] || { echo "--session-dir requires a non-empty value." >&2; exit 1; }
+  fi
+  if [[ "$session_dir_mode" == "auto" ]]; then
+    if [[ "$dry_run" -eq 1 ]]; then
+      session_dir="$(build_default_session_dir 0)"
+    else
+      session_dir="$(build_default_session_dir 1)"
+      session_dir="$(cd "$session_dir" && pwd)"
+    fi
+  fi
+  if [[ "$session_dir_mode" != "disabled" && "$handoff_disabled" -eq 0 ]]; then
     handoff_enabled=1
   else
     handoff_enabled=0
   fi
-  if [[ -n "$session_dir" ]]; then
+  if [[ "$session_dir_mode" == "custom" ]]; then
     if [[ "$dry_run" -eq 1 ]]; then
       session_dir="$(resolve_path_without_creation "$session_dir")"
     else
@@ -686,7 +747,7 @@ else
 fi
 
 if [[ "$run_to_completion" -eq 1 && -z "$session_dir" ]]; then
-  echo "--run-to-completion requires --session-dir." >&2
+  echo "--run-to-completion requires session storage; remove --no-session-dir." >&2
   exit 1
 fi
 if [[ "$run_to_completion" -eq 1 && "$handoff_enabled" -eq 0 ]]; then
@@ -804,7 +865,7 @@ for ((step=start_step; step<=max_steps; step++)); do
     emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$prompt_kind" "$prompt_value" > "$effective"
     if [[ "$use_tmux" -eq 0 ]]; then
       set +e
-      bash -c "$agent_cmd" < "$effective" > "$stdout_log" 2> "$stderr_log"
+      run_agent_with_logs "$agent_cmd" "$effective" "$stdout_log" "$stderr_log"
       code=$?
       set -e
       printf '%s\n' "$code" > "$step_dir/exit_code.txt"

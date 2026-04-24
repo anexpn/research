@@ -335,13 +335,15 @@ EOF
   [[ "$output" == *"--prompt-file requires a non-empty value."* ]]
 }
 
-@test "runs without session dir and does not create run artifacts" {
+@test "defaults session dir to a temp folder and writes run artifacts" {
   agent_a="$BIN_DIR/agent-a"
   agent_b="$BIN_DIR/agent-b"
+  tmp_root="$TEST_ROOT/tmp"
+  mkdir -p "$tmp_root"
   make_agent "$agent_a" "agent-a\n"
   make_agent "$agent_b" "agent-b\n"
 
-  run bash "$SCRIPT_PATH" \
+  run env TMPDIR="$tmp_root" bash "$SCRIPT_PATH" \
     --prompt-file "$PROMPT_DIR/builder.md" \
     --prompt-file "$PROMPT_DIR/reviewer.md" \
     --agent-cmd "$agent_a" \
@@ -349,10 +351,43 @@ EOF
     --max-steps 3
 
   [ "$status" -eq 0 ]
+  session_dir="$(printf '%s\n' "$output" | awk -F= '/^session_dir=/{print $2; exit}')"
+  [[ "$session_dir" == "$tmp_root"/converge-session.* ]]
   [[ "$output" == *"Starting agent loop"* ]]
   [[ "$output" == *"prompt_count=2"* ]]
+  [[ "$output" == *"agent-a"* ]]
+  [[ "$output" == *"agent-b"* ]]
   [[ "$output" == *"[step 3] done exit=0"* ]]
-  [ ! -d "$TEST_ROOT/run" ]
+  [ -d "$session_dir/run" ]
+  [ -f "$session_dir/run/s001/stdout.log" ]
+  [ -f "$session_dir/run/s002/stdout.log" ]
+  [ -f "$session_dir/run/s003/stdout.log" ]
+  [[ "$(<"$session_dir/run/s001/stdout.log")" == *"agent-a"* ]]
+  [[ "$(<"$session_dir/run/s002/stdout.log")" == *"agent-b"* ]]
+  [[ "$(<"$session_dir/run/s003/stdout.log")" == *"agent-a"* ]]
+}
+
+@test "--no-session-dir preserves no-artifact mode" {
+  agent_a="$BIN_DIR/agent-a"
+  agent_b="$BIN_DIR/agent-b"
+  tmp_root="$TEST_ROOT/tmp"
+  mkdir -p "$tmp_root"
+  make_agent "$agent_a" "agent-a\n"
+  make_agent "$agent_b" "agent-b\n"
+
+  run env TMPDIR="$tmp_root" bash "$SCRIPT_PATH" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --prompt-file "$PROMPT_DIR/reviewer.md" \
+    --agent-cmd "$agent_a" \
+    --agent-cmd "$agent_b" \
+    --max-steps 3 \
+    --no-session-dir
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"session_dir="* ]]
+  [[ "$output" == *"agent-a"* ]]
+  [[ "$output" == *"agent-b"* ]]
+  [ -z "$(find "$tmp_root" -maxdepth 1 -name 'converge-session.*' -print -quit)" ]
 }
 
 @test "dry run prints plan and does not execute agents" {
@@ -379,7 +414,7 @@ EOF
   [ ! -f "$marker" ]
 }
 
-@test "rejects --run-to-completion without session dir" {
+@test "rejects --run-to-completion when session storage is disabled" {
   agent_path="$BIN_DIR/agent"
   make_agent "$agent_path" "ok\n"
 
@@ -387,10 +422,11 @@ EOF
     --prompt-file "$PROMPT_DIR/builder.md" \
     --agent-cmd "$agent_path" \
     --max-steps 2 \
+    --no-session-dir \
     --run-to-completion
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"--run-to-completion requires --session-dir."* ]]
+  [[ "$output" == *"--run-to-completion requires session storage; remove --no-session-dir."* ]]
 }
 
 @test "rejects --run-to-completion when handoff is disabled" {
