@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ABOUTME: Render Builder and Reviewer prompt files for the build-review-loop skill.
-# ABOUTME: Fill bundled templates with the resolved build brief path and optional role requirements.
+# ABOUTME: Fill bundled templates with the resolved design spec path and optional role requirements.
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
 PROMPTS_DIR = SKILL_DIR / "prompts"
 
-BUILD_BRIEF_PLACEHOLDER = "{{BUILD_BRIEF_PATH}}"
+DESIGN_SPEC_PLACEHOLDER = "{{DESIGN_SPEC_PATH}}"
 ROLE_REQUIREMENTS_PLACEHOLDER = "{{ROLE_REQUIREMENTS_BLOCK}}"
 
 
@@ -20,9 +20,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Render Builder and Reviewer prompt files for build-review-loop."
     )
-    parser.add_argument("--build-brief", type=Path, required=True)
-    parser.add_argument("--builder-output", type=Path, required=True)
-    parser.add_argument("--reviewer-output", type=Path, required=True)
+    parser.add_argument("design_spec", type=Path)
+    parser.add_argument("--builder-output", type=Path)
+    parser.add_argument("--reviewer-output", type=Path)
     parser.add_argument(
         "--builder-template",
         type=Path,
@@ -67,18 +67,18 @@ def render_role_requirements(requirements: list[str]) -> str:
 def render_prompt(
     template_path: Path,
     *,
-    build_brief_path: Path,
+    design_spec_path: Path,
     requirements: list[str],
 ) -> str:
     template_text = require_file(template_path, label="template").read_text(
         encoding="utf-8"
     )
 
-    for placeholder in (BUILD_BRIEF_PLACEHOLDER, ROLE_REQUIREMENTS_PLACEHOLDER):
+    for placeholder in (DESIGN_SPEC_PLACEHOLDER, ROLE_REQUIREMENTS_PLACEHOLDER):
         if placeholder not in template_text:
             raise ValueError(f"Missing placeholder {placeholder!r} in {template_path}")
 
-    prompt_text = template_text.replace(BUILD_BRIEF_PLACEHOLDER, str(build_brief_path))
+    prompt_text = template_text.replace(DESIGN_SPEC_PLACEHOLDER, str(design_spec_path))
     prompt_text = prompt_text.replace(
         ROLE_REQUIREMENTS_PLACEHOLDER, render_role_requirements(requirements)
     )
@@ -99,23 +99,37 @@ def write_prompt(output_path: Path, prompt_text: str) -> Path:
     return resolved
 
 
+def default_builder_output_path(design_spec_path: Path) -> Path:
+    return design_spec_path.parent / "build-review-loop.builder.prompt.md"
+
+
+def default_reviewer_output_path(design_spec_path: Path) -> Path:
+    return design_spec_path.parent / "build-review-loop.reviewer.prompt.md"
+
+
 def main() -> int:
     args = parse_args()
-    build_brief_path = require_file(args.build_brief, label="build brief")
+    design_spec_path = require_file(args.design_spec, label="design spec")
 
     builder_prompt = render_prompt(
         args.builder_template,
-        build_brief_path=build_brief_path,
+        design_spec_path=design_spec_path,
         requirements=args.builder_requirements,
     )
     reviewer_prompt = render_prompt(
         args.reviewer_template,
-        build_brief_path=build_brief_path,
+        design_spec_path=design_spec_path,
         requirements=args.reviewer_requirements,
     )
 
-    builder_output = write_prompt(args.builder_output, builder_prompt)
-    reviewer_output = write_prompt(args.reviewer_output, reviewer_prompt)
+    builder_output = write_prompt(
+        args.builder_output or default_builder_output_path(design_spec_path),
+        builder_prompt,
+    )
+    reviewer_output = write_prompt(
+        args.reviewer_output or default_reviewer_output_path(design_spec_path),
+        reviewer_prompt,
+    )
 
     print(f"builder_prompt={builder_output}")
     print(f"reviewer_prompt={reviewer_output}")

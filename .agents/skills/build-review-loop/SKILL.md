@@ -1,19 +1,19 @@
 ---
 name: build-review-loop
-description: Run a rotating Builder and Reviewer loop from a markdown build brief. Use when Human wants an iterative implementation-review cycle, wants Builder and Reviewer prompt files generated from a written brief, or wants a converge.sh run or resume command assembled for repeated agent handoffs.
+description: Run a rotating Builder and Reviewer loop from a markdown design spec. Use when Human wants an iterative implementation-review cycle, wants Builder and Reviewer prompt files generated from a design/spec document, or wants a converge.sh run or resume command assembled for repeated agent handoffs.
 ---
 
 # Build Review Loop
 
 Use this skill to run a two-role rotating loop with the bundled prompts, `scripts/render_prompts.py`, and `scripts/converge.sh`.
 
-## Require a build brief
+## Require a design spec
 
-- Require one markdown file that states what to build.
+- Require one markdown design/spec file that states what to build.
 - If Human already provided the path, accept it and do not ask again.
 - If the path is missing, ask only for that path first.
 - Do not proceed without this file.
-- Resolve the brief path to an absolute path before rendering prompts or assembling commands.
+- Resolve the design spec path to an absolute path before rendering prompts or assembling commands.
 
 ## Keep the interaction portable
 
@@ -28,18 +28,18 @@ Use this skill to run a two-role rotating loop with the bundled prompts, `script
 ## Use these defaults
 
 - Store prompt files.
-- Write prompt files next to the build brief:
+- Write prompt files next to the design spec:
   - `build-review-loop.builder.prompt.md`
   - `build-review-loop.reviewer.prompt.md`
 - Use one agent source for both roles.
 - Use `--max-steps 10`.
-- Use session dir `build-review-loop.session` next to the build brief.
+- Use session dir `build-review-loop.session` next to the design spec.
 - Keep `--tmux`, `--tmux-cleanup`, `--tmux-session-name`, and `--dry-run` unset unless Human explicitly asks for them.
 - Leave Builder and Reviewer special requirements empty unless Human selects them.
 
 ## Ask in this order
 
-1. Ask for the build brief path if it is missing.
+1. Ask for the design spec path if it is missing.
 2. Ask for the initial settings selection with these concrete multi-select options:
    - `Use all default settings`
    - `Do not store prompt files`
@@ -62,7 +62,7 @@ Use this skill to run a two-role rotating loop with the bundled prompts, `script
    - `Provide a custom agent command`
 6. If Human selected `Provide a custom agent command`, ask only for the command string for the relevant role.
 7. If Human selected `Choose a different session directory`, ask this exact three-option question:
-   - `Use this session directory: <brief-dir>/build-review-loop.session`
+   - `Use this session directory: <design-spec-dir>/build-review-loop.session`
    - `Use a different session directory`
    - `Do not use a session directory`
    Ask for a free-text path only if Human chooses `Use a different session directory`.
@@ -78,16 +78,17 @@ Prompt text must be concise and complete.
 - Tell, do not instruct.
 - Avoid policy chatter.
 - Keep each role focused on outcomes and artifacts.
-- Frame the build brief as implementation input, not as the artifact to rewrite, unless Human explicitly wants the brief updated.
+- Frame the design spec as the authoritative implementation input, not as the artifact to rewrite, unless Human explicitly wants the design spec updated.
+- Make the design spec stronger than the handoff. The handoff is continuity context, not the source of truth.
 - Keep role-specific requirement text short and concrete.
 
 When Human wants stored prompt files, render them with the bundled helper instead of editing templates by hand:
 
 ```bash
 uv run python .agents/skills/build-review-loop/scripts/render_prompts.py \
-  --build-brief "<absolute-build-brief.md>" \
-  --builder-output "<brief-dir>/build-review-loop.builder.prompt.md" \
-  --reviewer-output "<brief-dir>/build-review-loop.reviewer.prompt.md" \
+  "<absolute-design-spec.md>" \
+  --builder-output "<design-spec-dir>/build-review-loop.builder.prompt.md" \
+  --reviewer-output "<design-spec-dir>/build-review-loop.reviewer.prompt.md" \
   --builder-requirement "<builder-option>" \
   --reviewer-requirement "<reviewer-option>"
 ```
@@ -109,15 +110,16 @@ If Human chose not to store prompt files, do not write them. Use that mode only 
 - Use `-n` only when the step count differs from the script default or when showing the chosen explicit value helps clarity.
 - Keep tmux-related flags at defaults unless Human explicitly asked for them.
 - For risk review, resolve every selected preset to its concrete agent command before deciding whether the run is safe enough to present without caveat. Do not treat a raw `-A <preset>` token as evidence that no risky flags are present.
+- Keep the design spec authoritative across every step. Do not let a prior handoff redefine the required work.
 
 Default shape:
 
 ```bash
 bash .agents/skills/build-review-loop/scripts/converge.sh run \
   -A codex \
-  -f "<brief-dir>/build-review-loop.builder.prompt.md" \
-  -f "<brief-dir>/build-review-loop.reviewer.prompt.md" \
-  -s "<brief-dir>/build-review-loop.session" \
+  -f "<design-spec-dir>/build-review-loop.builder.prompt.md" \
+  -f "<design-spec-dir>/build-review-loop.reviewer.prompt.md" \
+  -s "<design-spec-dir>/build-review-loop.session" \
   -n 10
 ```
 

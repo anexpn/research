@@ -8,7 +8,7 @@ Use these option sets when Human wants role-specific requirements. Present the l
 - Keep diffs local and avoid unrelated cleanup.
 - Run targeted verification before handoff.
 - Avoid adding new dependencies.
-- Update brief-adjacent docs when behavior changes.
+- Update design-spec-adjacent docs when behavior changes.
 
 ## Reviewer options
 
