@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `--run-to-completion` to `scripts/converge.sh` so the shell converge loop can stop before `--max-steps` after two consecutive whole-work `complete` judgements emitted through handoff files.
+**Goal:** Add `--run-to-completion` to `scripts/converge.sh` so the shell converge loop can stop before `--max-steps` after two consecutive whole-work `complete` judgements emitted through dedicated completion-status files.
 
-**Architecture:** Keep `--max-steps` as the hard ceiling and layer run-to-completion on top of the existing handoff artifact flow. The shell runner will persist the new mode in run metadata, teach agents to emit YAML frontmatter in `handoff.md`, recompute a trailing completion streak on `resume`, and stop early only after two consecutive `complete` judgements. Missing or malformed handoff judgements are treated as non-fatal `incomplete` signals so the safe fallback is to continue the loop.
+**Architecture:** Keep `--max-steps` as the hard ceiling and layer run-to-completion on top of the existing session artifact flow. The shell runner will persist the new mode in run metadata, teach agents to emit `complete|incomplete` into per-step `completion_status.txt`, recompute a trailing completion streak on `resume`, and stop early only after two consecutive `complete` judgements. Missing or malformed completion judgements are treated as non-fatal `incomplete` signals so the safe fallback is to continue the loop. Handoff stays optional and separate.
 
 **Tech Stack:** POSIX shell, Bash arrays/functions, Bats, Markdown docs
 
@@ -13,14 +13,16 @@
 ## File Structure
 
 - `tests/converge_sh.bats`: black-box CLI contract, fake agent helpers, run-to-completion regression tests, and resume coverage.
-- `scripts/converge.sh`: CLI parsing, metadata persistence, handoff judgement parsing, runtime protocol text, loop logging, and early-stop/resume control flow.
-- `scripts/converge.md`: usage docs, runtime protocol contract, handoff frontmatter format, and resume behavior.
+- `scripts/converge.sh`: CLI parsing, metadata persistence, completion-status parsing, runtime protocol text, loop logging, and early-stop/resume control flow.
+- `scripts/converge.md`: usage docs, runtime protocol contract, completion-status format, and resume behavior.
 
 ## Execution Notes
 
 - This repo uses `jj`; use `jj status` and `jj diff --git` for checkpoints and `jj commit` for the final green commit.
-- Keep scope limited to the shell runner and its Bats contract. Do not introduce a sidecar completion artifact or any Python/Ruby changes.
+- Keep scope limited to the shell runner and its Bats contract. Use a dedicated per-step completion artifact and avoid unrelated Python/Ruby changes.
 - Stay in TDD order: tests first, verify red, implement minimally, verify green, then update docs.
+
+**Revision:** Run-to-completion no longer depends on `handoff.md`. The authoritative signal is `<session-dir>/run/sNNN/completion_status.txt`, and `--no-handoff` remains compatible with `--run-to-completion`.
 
 ### Task 1: Lock the CLI contract with failing Bats tests
 

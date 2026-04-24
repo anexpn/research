@@ -37,7 +37,7 @@ EOF
   chmod +x "$path"
 }
 
-make_sequence_handoff_agent() {
+make_sequence_completion_agent() {
   local path="$1"
   local sequence_file="$2"
   local count_file="$3"
@@ -46,7 +46,12 @@ make_sequence_handoff_agent() {
 #!/usr/bin/env bash
 set -euo pipefail
 payload="\$(cat)"
+output_completion="\$(printf '%s\n' "\$payload" | awk -F': ' '/^- output_completion:/ { print \$2; exit }')"
 output_handoff="\$(printf '%s\n' "\$payload" | awk -F': ' '/^- output_handoff:/ { print \$2; exit }')"
+[[ -n "\$output_completion" ]] || {
+  echo "Missing output_completion path" >&2
+  exit 1
+}
 count=0
 if [[ -f "$count_file" ]]; then
   count="\$(<"$count_file")"
@@ -57,26 +62,18 @@ judgement="\$(sed -n "\${count}p" "$sequence_file")"
 
 case "\$judgement" in
   complete|incomplete)
-    cat > "\$output_handoff" <<HANDOFF
----
-converge_work_judgement: \$judgement
-converge_reason: scripted-\$judgement-step-\$count
----
-
+    printf '%s\n' "\$judgement" > "\$output_completion"
+    if [[ -n "\$output_handoff" ]]; then
+      cat > "\$output_handoff" <<HANDOFF
 Step \$count handoff body.
 HANDOFF
+    fi
     ;;
   malformed)
-    cat > "\$output_handoff" <<HANDOFF
----
-converge_work_judgement: maybe
----
-
-Malformed handoff body.
-HANDOFF
+    printf '%s\n' 'maybe later' > "\$output_completion"
     ;;
   missing)
-    : > "\$output_handoff"
+    : > "\$output_completion"
     ;;
   *)
     echo "Unknown judgement: \$judgement" >&2
@@ -429,21 +426,31 @@ EOF
   [[ "$output" == *"--run-to-completion requires session storage; remove --no-session-dir."* ]]
 }
 
-@test "rejects --run-to-completion when handoff is disabled" {
+@test "--run-to-completion works when handoff is disabled" {
   session_dir="$TEST_ROOT/session"
+  sequence_file="$TEST_ROOT/judgements.txt"
+  count_file="$TEST_ROOT/count.txt"
   agent_path="$BIN_DIR/agent"
-  make_agent "$agent_path" "ok\n"
+  printf 'complete\ncomplete\ncomplete\n' > "$sequence_file"
+  printf '0\n' > "$count_file"
+  make_sequence_completion_agent "$agent_path" "$sequence_file" "$count_file"
 
   run bash "$SCRIPT_PATH" \
     --session-dir "$session_dir" \
     --prompt-file "$PROMPT_DIR/builder.md" \
     --agent-cmd "$agent_path" \
-    --max-steps 2 \
+    --max-steps 5 \
     --no-handoff \
     --run-to-completion
 
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"--run-to-completion requires handoff mode; remove --no-handoff."* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Completion confirmed at step 2 after 2 consecutive complete judgements."* ]]
+  [ -f "$session_dir/run/s001/completion_status.txt" ]
+  [ ! -e "$session_dir/run/s001/handoff.md" ]
+  [ "$(<"$session_dir/run/s001/completion_status.txt")" = "complete" ]
+  prompt_one="$(<"$session_dir/run/s001/effective_prompt.md")"
+  [[ "$prompt_one" == *"output_completion: $session_dir/run/s001/completion_status.txt"* ]]
+  [[ "$prompt_one" != *"output_handoff:"* ]]
 }
 
 @test "dry run prints run-to-completion mode and streak target" {
@@ -462,6 +469,7 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"completion_mode=run_to_completion"* ]]
   [[ "$output" == *"completion_streak_target=2"* ]]
+  [[ "$output" == *"output_completion=$session_dir/run/s001/completion_status.txt"* ]]
 }
 
 @test "dry run preserves a new session-dir path that does not exist yet" {
@@ -639,7 +647,7 @@ EOF
   agent_path="$BIN_DIR/agent"
   printf 'complete\ncomplete\ncomplete\n' > "$sequence_file"
   printf '0\n' > "$count_file"
-  make_sequence_handoff_agent "$agent_path" "$sequence_file" "$count_file"
+  make_sequence_completion_agent "$agent_path" "$sequence_file" "$count_file"
 
   run bash "$SCRIPT_PATH" \
     --session-dir "$session_dir" \
@@ -654,7 +662,8 @@ EOF
   [ -f "$session_dir/run/s002/exit_code.txt" ]
   [ ! -e "$session_dir/run/s003/exit_code.txt" ]
   [[ "$(<"$session_dir/run/s001/effective_prompt.md")" == *"completion_mode: run_to_completion"* ]]
-  [[ "$(<"$session_dir/run/s001/effective_prompt.md")" == *"converge_work_judgement: complete|incomplete"* ]]
+  [[ "$(<"$session_dir/run/s001/effective_prompt.md")" == *"output_completion: $session_dir/run/s001/completion_status.txt"* ]]
+  [ "$(<"$session_dir/run/s001/completion_status.txt")" = "complete" ]
   [[ "$(<"$session_dir/run/loop/loop.log")" == *"completion_judgement=complete completion_streak=2/2"* ]]
 }
 
@@ -665,7 +674,7 @@ EOF
   agent_path="$BIN_DIR/agent"
   printf 'complete\nincomplete\ncomplete\ncomplete\n' > "$sequence_file"
   printf '0\n' > "$count_file"
-  make_sequence_handoff_agent "$agent_path" "$sequence_file" "$count_file"
+  make_sequence_completion_agent "$agent_path" "$sequence_file" "$count_file"
 
   run bash "$SCRIPT_PATH" \
     --session-dir "$session_dir" \
@@ -688,7 +697,7 @@ EOF
   agent_path="$BIN_DIR/agent"
   printf 'malformed\nmissing\ncomplete\ncomplete\n' > "$sequence_file"
   printf '0\n' > "$count_file"
-  make_sequence_handoff_agent "$agent_path" "$sequence_file" "$count_file"
+  make_sequence_completion_agent "$agent_path" "$sequence_file" "$count_file"
 
   run bash "$SCRIPT_PATH" \
     --session-dir "$session_dir" \
@@ -863,16 +872,18 @@ EOF
   agent_path="$BIN_DIR/agent"
   printf 'incomplete\ncomplete\ncomplete\ncomplete\n' > "$sequence_file"
   printf '0\n' > "$count_file"
-  make_sequence_handoff_agent "$agent_path" "$sequence_file" "$count_file"
+  make_sequence_completion_agent "$agent_path" "$sequence_file" "$count_file"
 
   run bash "$SCRIPT_PATH" run \
     --session-dir "$session_dir" \
     --prompt-file "$PROMPT_DIR/builder.md" \
     --agent-cmd "$agent_path" \
     --max-steps 2 \
+    --no-handoff \
     --run-to-completion
   [ "$status" -eq 0 ]
   [ -f "$session_dir/run/s002/exit_code.txt" ]
+  [ ! -e "$session_dir/run/s001/handoff.md" ]
 
   run bash "$SCRIPT_PATH" resume \
     --session-dir "$session_dir" \
@@ -883,6 +894,7 @@ EOF
   [[ "$output" == *"Completion confirmed at step 3 after 2 consecutive complete judgements."* ]]
   [ -f "$session_dir/run/s003/exit_code.txt" ]
   [ ! -e "$session_dir/run/s004/exit_code.txt" ]
+  [ ! -e "$session_dir/run/s003/handoff.md" ]
 }
 
 @test "resume exits immediately when completion was already confirmed" {
@@ -892,17 +904,19 @@ EOF
   agent_path="$BIN_DIR/agent"
   printf 'complete\ncomplete\ncomplete\n' > "$sequence_file"
   printf '0\n' > "$count_file"
-  make_sequence_handoff_agent "$agent_path" "$sequence_file" "$count_file"
+  make_sequence_completion_agent "$agent_path" "$sequence_file" "$count_file"
 
   run bash "$SCRIPT_PATH" run \
     --session-dir "$session_dir" \
     --prompt-file "$PROMPT_DIR/builder.md" \
     --agent-cmd "$agent_path" \
     --max-steps 5 \
+    --no-handoff \
     --run-to-completion
   [ "$status" -eq 0 ]
   [ -f "$session_dir/run/s002/exit_code.txt" ]
   [ ! -e "$session_dir/run/s003/exit_code.txt" ]
+  [ ! -e "$session_dir/run/s001/handoff.md" ]
 
   run bash "$SCRIPT_PATH" resume \
     --session-dir "$session_dir" \

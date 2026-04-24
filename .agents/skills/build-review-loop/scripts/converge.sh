@@ -15,6 +15,7 @@ set -euo pipefail
 # - <session-dir>/run/sNNN/stdout.log
 # - <session-dir>/run/sNNN/stderr.log
 # - <session-dir>/run/sNNN/exit_code.txt
+# - <session-dir>/run/sNNN/completion_status.txt (only when run-to-completion is enabled)
 # - <session-dir>/run/sNNN/handoff.md (only when handoff is enabled)
 # Session storage defaults:
 # - enabled with a temp dir
@@ -47,7 +48,7 @@ RUN OPTIONAL
                   Disable session storage and run artifacts.
   -n, --max-steps     Number of loop iterations (default: 10).
       --run-to-completion
-                  Stop early after 2 consecutive complete handoff judgements.
+                  Stop early after 2 consecutive complete work judgements.
   -t, --tmux          Run each step in a tmux window for live observability.
   -x, --tmux-cleanup  Auto-kill tmux session when loop exits or is interrupted.
   -T, --tmux-session-name
@@ -179,7 +180,7 @@ configure_tmux_window() {
 }
 
 emit_effective_prompt() {
-  local step="$1" agent_cmd="$2" input_handoff="$3" output_handoff="$4" prompt_kind="$5" prompt_value="$6"
+  local step="$1" agent_cmd="$2" input_handoff="$3" output_handoff="$4" output_completion="$5" prompt_kind="$6" prompt_value="$7"
   echo "# Runtime Protocol"
   echo
   echo "- step: $step"
@@ -187,7 +188,8 @@ emit_effective_prompt() {
   if [[ "$run_to_completion" -eq 1 ]]; then
     echo "- completion_mode: run_to_completion"
     echo "- completion_streak_target: $completion_streak_target"
-    echo "- write YAML frontmatter to output_handoff with converge_work_judgement: complete|incomplete."
+    echo "- output_completion: $output_completion"
+    echo "- write exactly one word to output_completion: complete|incomplete."
     echo "- use complete only if the entire assignment appears finished and the loop should stop if the next step independently agrees."
     echo "- use incomplete if any implementation, review, verification, or uncertainty remains."
   fi
@@ -481,25 +483,20 @@ compute_handoff_paths() {
   fi
 }
 
-parse_handoff_judgement() {
-  local handoff_path="$1" line judgement="" in_frontmatter=0
-  parsed_completion_judgement=""
-  [[ -f "$handoff_path" ]] || return 0
+compute_completion_path() {
+  local step="$1"
+  step_output_completion=""
+  if [[ -n "$session_dir" && "$run_to_completion" -eq 1 ]]; then
+    step_output_completion="$(printf '%s/s%03d/completion_status.txt' "$run_dir" "$step")"
+  fi
+}
 
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$in_frontmatter" -eq 0 ]]; then
-      [[ "$line" == "---" ]] || return 0
-      in_frontmatter=1
-      continue
-    fi
-    [[ "$line" == "---" ]] && break
-    case "$line" in
-      converge_work_judgement:*)
-        judgement="${line#converge_work_judgement:}"
-        judgement="$(printf '%s' "$judgement" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-        ;;
-    esac
-  done < "$handoff_path"
+parse_completion_judgement() {
+  local completion_path="$1" judgement=""
+  parsed_completion_judgement=""
+  [[ -f "$completion_path" ]] || return 0
+  judgement="$(tr -d '\r' < "$completion_path")"
+  judgement="$(printf '%s' "$judgement" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
 
   case "$judgement" in
     complete|incomplete) parsed_completion_judgement="$judgement" ;;
@@ -508,11 +505,11 @@ parse_handoff_judgement() {
 }
 
 recompute_completion_streak() {
-  local root="$1" last_step="$2" step handoff_path
+  local root="$1" last_step="$2" step completion_path
   completion_streak=0
   for ((step=last_step; step>=1; step--)); do
-    handoff_path="$(printf '%s/s%03d/handoff.md' "$root" "$step")"
-    parse_handoff_judgement "$handoff_path"
+    completion_path="$(printf '%s/s%03d/completion_status.txt' "$root" "$step")"
+    parse_completion_judgement "$completion_path"
     if [[ "$parsed_completion_judgement" == "complete" ]]; then
       completion_streak=$((completion_streak + 1))
     else
@@ -522,8 +519,8 @@ recompute_completion_streak() {
 }
 
 record_step_completion_state() {
-  local handoff_path="$1"
-  parse_handoff_judgement "$handoff_path"
+  local completion_path="$1"
+  parse_completion_judgement "$completion_path"
   case "$parsed_completion_judgement" in
     complete)
       current_completion_judgement="complete"
@@ -542,7 +539,7 @@ record_step_completion_state() {
 
 print_plan() {
   local start_step="$1" end_step="$2"
-  local step input_handoff output_handoff
+  local step input_handoff output_handoff output_completion
   echo "Dry run plan"
   echo "mode=$mode"
   [[ -n "$session_dir" ]] && echo "session_dir=$session_dir"
@@ -559,13 +556,18 @@ print_plan() {
   for ((step=start_step; step<=end_step; step++)); do
     resolve_step_context "$step"
     compute_handoff_paths "$step"
+    compute_completion_path "$step"
     input_handoff="$step_input_handoff"
     output_handoff="$step_output_handoff"
+    output_completion="$step_output_completion"
     echo "[step $step] prompt=$step_prompt_label kind=$step_prompt_kind"
     if [[ "$step_prompt_kind" == "file" ]]; then
       echo "  prompt_file=$step_prompt_value"
     fi
     echo "  agent_cmd=$step_agent_cmd"
+    if [[ -n "$output_completion" ]]; then
+      echo "  output_completion=$output_completion"
+    fi
     if [[ -n "$input_handoff" ]]; then
       echo "  input_handoff=$input_handoff"
     fi
@@ -750,11 +752,6 @@ if [[ "$run_to_completion" -eq 1 && -z "$session_dir" ]]; then
   echo "--run-to-completion requires session storage; remove --no-session-dir." >&2
   exit 1
 fi
-if [[ "$run_to_completion" -eq 1 && "$handoff_enabled" -eq 0 ]]; then
-  echo "--run-to-completion requires handoff mode; remove --no-handoff." >&2
-  exit 1
-fi
-
 run_dir=""
 loop_log=""
 if [[ -n "$session_dir" ]]; then
@@ -839,8 +836,10 @@ for ((step=start_step; step<=max_steps; step++)); do
   prompt_label="$step_prompt_label"
   agent_cmd="$step_agent_cmd"
   compute_handoff_paths "$step"
+  compute_completion_path "$step"
   input_handoff="$step_input_handoff"
   output_handoff="$step_output_handoff"
+  output_completion="$step_output_completion"
   step_dir=""
   stdout_log=""
   stderr_log=""
@@ -862,7 +861,10 @@ for ((step=start_step; step<=max_steps; step++)); do
       fi
       : > "$output_handoff"
     fi
-    emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$prompt_kind" "$prompt_value" > "$effective"
+    if [[ -n "$output_completion" ]]; then
+      : > "$output_completion"
+    fi
+    emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$output_completion" "$prompt_kind" "$prompt_value" > "$effective"
     if [[ "$use_tmux" -eq 0 ]]; then
       set +e
       run_agent_with_logs "$agent_cmd" "$effective" "$stdout_log" "$stderr_log"
@@ -873,7 +875,10 @@ for ((step=start_step; step<=max_steps; step++)); do
   fi
 
   if [[ "$use_tmux" -eq 1 ]]; then
-    effective_prompt="$(emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$prompt_kind" "$prompt_value")"
+    if [[ -n "$output_completion" ]]; then
+      : > "$output_completion"
+    fi
+    effective_prompt="$(emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$output_completion" "$prompt_kind" "$prompt_value")"
     window_name="$(build_tmux_window_name "$step" "$prompt_label")"
     wait_channel="$(build_tmux_wait_channel "$tmux_session_name" "$window_name" "$step")"
     active_tmux_exit_code_file="$(mktemp "${TMPDIR:-/tmp}/converge-tmux-exit.XXXXXX")"
@@ -897,7 +902,7 @@ for ((step=start_step; step<=max_steps; step++)); do
     fi
   elif [[ -z "$session_dir" ]]; then
     set +e
-    emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$prompt_kind" "$prompt_value" | bash -c "$agent_cmd"
+    emit_effective_prompt "$step" "$agent_cmd" "$input_handoff" "$output_handoff" "$output_completion" "$prompt_kind" "$prompt_value" | bash -c "$agent_cmd"
     code=$?
     set -e
   fi
@@ -907,7 +912,7 @@ for ((step=start_step; step<=max_steps; step++)); do
   echo "[step $step] done exit=$code elapsed=${elapsed}s"
   completed_steps=$((completed_steps + 1))
   if [[ "$run_to_completion" -eq 1 ]]; then
-    record_step_completion_state "$output_handoff"
+    record_step_completion_state "$output_completion"
     echo "completion_judgement=$current_completion_judgement streak=${completion_streak}/${completion_streak_target}"
   fi
   if [[ -n "$loop_log" ]]; then
