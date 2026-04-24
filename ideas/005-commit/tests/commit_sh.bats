@@ -14,12 +14,14 @@ setup() {
   export AGENT_ARGS_FILE="$TEST_ROOT/agent-args"
   export AGENT_STDIN_FILE="$TEST_ROOT/agent-stdin"
   export AGENT_OUTPUT_FILE="$TEST_ROOT/agent-output"
+  export AGENT_BEHAVIOR_FILE="$TEST_ROOT/agent-behavior"
   export AGENT_EXIT_CODE=0
 
   link_system_command awk
   link_system_command basename
   link_system_command bash
   link_system_command cat
+  link_system_command chmod
   link_system_command env
   link_system_command git
   link_system_command jj
@@ -27,6 +29,7 @@ setup() {
   link_system_command mktemp
   link_system_command rm
   link_system_command sed
+  link_system_command sleep
 
   create_agent_stub codex
   create_agent_stub claude
@@ -49,6 +52,11 @@ set -euo pipefail
 printf '%s' "$(basename "$0")" >"$AGENT_NAME_FILE"
 printf '%s\0' "$@" >"$AGENT_ARGS_FILE"
 cat >"$AGENT_STDIN_FILE"
+
+if [[ -n "${AGENT_BEHAVIOR_FILE:-}" && -f "$AGENT_BEHAVIOR_FILE" ]]; then
+  "$AGENT_BEHAVIOR_FILE"
+  exit $?
+fi
 
 if [[ -n "${AGENT_OUTPUT_FILE:-}" && -f "$AGENT_OUTPUT_FILE" ]]; then
   cat "$AGENT_OUTPUT_FILE"
@@ -98,6 +106,11 @@ init_jj_repo() {
 
 set_agent_output() {
   printf '%s' "$1" >"$AGENT_OUTPUT_FILE"
+}
+
+set_agent_behavior() {
+  printf '%s' "$1" >"$AGENT_BEHAVIOR_FILE"
+  chmod +x "$AGENT_BEHAVIOR_FILE"
 }
 
 run_in_repo() {
@@ -293,6 +306,84 @@ assert_contains() {
   assert_success
   assert_contains "$(cat "$AGENT_STDIN_FILE")" 'Style mode: conventional'
   assert_contains "$(cat "$AGENT_STDIN_FILE")" 'Conventional commits take priority'
+}
+
+@test "default mode hides agent stdout while generating the message" {
+  local repo="$TEST_ROOT/default-quiet"
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  set_agent_output $'feat: hidden by default\n\nhidden body marker'
+
+  run run_in_repo "$repo" --agent codex --vcs git
+
+  assert_success
+  if [[ "$output" == *'hidden body marker'* ]]; then
+    printf 'agent stdout leaked in default mode\n' >&2
+    return 1
+  fi
+}
+
+@test "default mode hides agent stderr on success" {
+  local repo="$TEST_ROOT/default-hides-stderr"
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  set_agent_behavior $'#!/usr/bin/env bash\nprintf \'quiet stderr marker\\n\' >&2\nprintf \'feat: quiet success\\n\\nquiet body marker\\n\'\n'
+
+  run run_in_repo "$repo" --agent codex --vcs git
+
+  assert_success
+  if [[ "$output" == *'quiet stderr marker'* ]]; then
+    printf 'agent stderr leaked in default mode\n' >&2
+    return 1
+  fi
+}
+
+@test "--verbose matches vq behavior for multiline agent output" {
+  local repo="$TEST_ROOT/verbose-vq-multiline"
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  set_agent_output $'feat: verbose subject\n\nverbose body marker'
+
+  run run_in_repo "$repo" --agent codex --vcs git --verbose
+
+  assert_success
+  if [[ "$output" == *'verbose body marker'* ]]; then
+    printf 'agent stdout leaked in verbose mode\n' >&2
+    return 1
+  fi
+  [[ "$(git -C "$repo" log -1 --format=%B)" == $'feat: verbose subject\n\nverbose body marker' ]]
+}
+
+@test "--verbose keeps agent stderr visible like vq" {
+  local repo="$TEST_ROOT/verbose-vq-stderr"
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  set_agent_behavior $'#!/usr/bin/env bash\nprintf \'verbose stderr marker\\n\' >&2\nprintf \'feat: verbose stderr\\n\'\n'
+
+  run run_in_repo "$repo" --agent codex --vcs git --verbose
+
+  assert_success
+  assert_contains "$output" 'verbose stderr marker'
+}
+
+@test "default mode stays quiet when stderr is not a terminal" {
+  local repo="$TEST_ROOT/default-no-spinner-non-tty"
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  set_agent_behavior $'#!/usr/bin/env bash\nsleep 0.3\nprintf \'feat: non-tty quiet\\n\'\n'
+
+  run run_in_repo "$repo" --agent codex --vcs git
+
+  assert_success
+  if [[ "$output" == *'Generating commit message'* ]]; then
+    printf 'spinner output leaked in non-interactive mode\n' >&2
+    return 1
+  fi
 }
 
 @test "recent commit subjects are secondary context in conventional mode" {
@@ -518,6 +609,25 @@ EOF
 
   assert_success
   [[ "$(git -C "$repo" log -1 --format=%B)" == $'feat: fenced subject\n\nBody line one' ]]
+}
+
+@test "default mode shows only agent stderr on failure" {
+  local repo="$TEST_ROOT/default-failure-stderr"
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  set_agent_behavior $'#!/usr/bin/env bash\nprintf \'hidden stdout marker\\n\'\nprintf \'visible stderr marker\\n\' >&2\nexit 12\n'
+
+  run run_in_repo "$repo" --agent codex --vcs git
+
+  assert_failure
+  assert_contains "$output" 'Agent stderr:'
+  assert_contains "$output" 'visible stderr marker'
+  if [[ "$output" == *'hidden stdout marker'* ]]; then
+    printf 'agent stdout leaked on default-mode failure\n' >&2
+    return 1
+  fi
+  assert_contains "$output" 'Agent command failed:'
 }
 
 @test "jj mode preserves normalized multiline commit messages" {

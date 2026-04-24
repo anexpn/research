@@ -15,6 +15,7 @@ Options:
   --template-file PATH
   --prompt TEXT
   --agent-arg ARG
+  --verbose
   -h, --help
 
 Template placeholders:
@@ -30,6 +31,16 @@ EOF
 die() {
   printf 'Error: %s\n' "$*" >&2
   exit 1
+}
+
+dump_file_if_present() {
+  local label=$1
+  local path=$2
+
+  [[ -n "$path" && -f "$path" && -s "$path" ]] || return 0
+
+  printf '%s\n' "$label" >&2
+  cat "$path" >&2
 }
 
 format_command() {
@@ -331,6 +342,8 @@ run_agent() {
   local -a cmd
   local output
   local resolved_command
+  local stderr_file=
+  local exit_code=0
 
   resolve_agent_command "$agent_name"
   cmd=("${agent_command[@]}")
@@ -344,14 +357,32 @@ run_agent() {
 
   resolved_command="$(format_command "${cmd[@]}")"
 
-  if [[ "$agent_input_mode" == "stdin" ]]; then
-    if ! output="$(printf '%s' "$prompt_text" | "${cmd[@]}")"; then
-      die "Agent command failed: $resolved_command"
+  if [[ "$verbose" == true ]]; then
+    if [[ "$agent_input_mode" == "stdin" ]]; then
+      if ! output="$(printf '%s' "$prompt_text" | "${cmd[@]}")"; then
+        die "Agent command failed: $resolved_command"
+      fi
+    else
+      if ! output="$("${cmd[@]}" "$prompt_text" < /dev/null)"; then
+        die "Agent command failed: $resolved_command"
+      fi
     fi
   else
-    if ! output="$("${cmd[@]}" "$prompt_text" < /dev/null)"; then
+    stderr_file="$(mktemp "${TMPDIR:-/tmp}/commit-sh-agent-stderr.XXXXXX")"
+
+    if [[ "$agent_input_mode" == "stdin" ]]; then
+      output="$(printf '%s' "$prompt_text" | "${cmd[@]}" 2>"$stderr_file")" || exit_code=$?
+    else
+      output="$("${cmd[@]}" "$prompt_text" < /dev/null 2>"$stderr_file")" || exit_code=$?
+    fi
+
+    if [[ "$exit_code" -ne 0 ]]; then
+      dump_file_if_present 'Agent stderr:' "$stderr_file"
+      rm -f "$stderr_file"
       die "Agent command failed: $resolved_command"
     fi
+
+    rm -f "$stderr_file"
   fi
 
   printf '%s' "$output"
@@ -396,6 +427,7 @@ message_file=
 agent_input_mode=
 agent_command=()
 agent_args=()
+verbose=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -428,6 +460,10 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || die '--agent-arg requires a value.'
       agent_args+=("$2")
       shift 2
+      ;;
+    --verbose)
+      verbose=true
+      shift
       ;;
     -h|--help)
       usage
