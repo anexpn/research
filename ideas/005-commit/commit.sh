@@ -43,6 +43,13 @@ dump_file_if_present() {
   cat "$path" >&2
 }
 
+remove_file_if_present() {
+  local path=$1
+
+  [[ -n "$path" && -e "$path" ]] || return 0
+  rm -f "$path"
+}
+
 format_command() {
   local formatted
   printf -v formatted '%q ' "$@"
@@ -337,11 +344,46 @@ resolve_agent_command() {
   fi
 }
 
+should_show_spinner() {
+  [[ "$verbose" == false && -t 2 ]]
+}
+
+wait_for_pid_with_spinner() {
+  local pid=$1
+  local message=$2
+  local -a frames=('|' '/' '-' "\\")
+  local frame_count=${#frames[@]}
+  local rendered=false
+  local line_width
+  local i=0
+  local status=0
+
+  line_width=$((${#message} + 2))
+
+  while kill -0 "$pid" >/dev/null 2>&1; do
+    printf '\r%s %s' "$message" "${frames[i % frame_count]}" >&2
+    rendered=true
+    sleep 0.1
+    i=$((i + 1))
+  done
+
+  wait "$pid" || status=$?
+
+  if [[ "$rendered" == true ]]; then
+    printf '\r%*s\r' "$line_width" '' >&2
+  fi
+
+  return "$status"
+}
+
 run_agent() {
   local prompt_text=$1
   local -a cmd
   local output
   local resolved_command
+  local agent_pid=
+  local prompt_file=
+  local stdout_file=
   local stderr_file=
   local exit_code=0
 
@@ -368,21 +410,37 @@ run_agent() {
       fi
     fi
   else
+    stdout_file="$(mktemp "${TMPDIR:-/tmp}/commit-sh-agent-stdout.XXXXXX")"
     stderr_file="$(mktemp "${TMPDIR:-/tmp}/commit-sh-agent-stderr.XXXXXX")"
 
     if [[ "$agent_input_mode" == "stdin" ]]; then
-      output="$(printf '%s' "$prompt_text" | "${cmd[@]}" 2>"$stderr_file")" || exit_code=$?
+      prompt_file="$(mktemp "${TMPDIR:-/tmp}/commit-sh-agent-prompt.XXXXXX")"
+      printf '%s' "$prompt_text" >"$prompt_file"
+      "${cmd[@]}" <"$prompt_file" >"$stdout_file" 2>"$stderr_file" &
     else
-      output="$("${cmd[@]}" "$prompt_text" < /dev/null 2>"$stderr_file")" || exit_code=$?
+      "${cmd[@]}" "$prompt_text" < /dev/null >"$stdout_file" 2>"$stderr_file" &
     fi
+
+    agent_pid=$!
+    if should_show_spinner; then
+      wait_for_pid_with_spinner "$agent_pid" 'Generating commit message...' || exit_code=$?
+    else
+      wait "$agent_pid" || exit_code=$?
+    fi
+
+    output="$(<"$stdout_file")"
 
     if [[ "$exit_code" -ne 0 ]]; then
       dump_file_if_present 'Agent stderr:' "$stderr_file"
-      rm -f "$stderr_file"
+      remove_file_if_present "$prompt_file"
+      remove_file_if_present "$stdout_file"
+      remove_file_if_present "$stderr_file"
       die "Agent command failed: $resolved_command"
     fi
 
-    rm -f "$stderr_file"
+    remove_file_if_present "$prompt_file"
+    remove_file_if_present "$stdout_file"
+    remove_file_if_present "$stderr_file"
   fi
 
   printf '%s' "$output"

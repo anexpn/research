@@ -30,6 +30,7 @@ setup() {
   link_system_command rm
   link_system_command sed
   link_system_command sleep
+  link_system_command script
 
   create_agent_stub codex
   create_agent_stub claude
@@ -119,6 +120,15 @@ run_in_repo() {
   (
     cd "$repo"
     "$PROJECT_ROOT/commit.sh" "$@"
+  )
+}
+
+run_in_repo_tty() {
+  local repo=$1
+  shift
+  (
+    cd "$repo"
+    script -q /dev/null "$PROJECT_ROOT/commit.sh" "$@"
   )
 }
 
@@ -340,6 +350,19 @@ assert_contains() {
   fi
 }
 
+@test "default mode shows a spinner in interactive quiet mode" {
+  local repo="$TEST_ROOT/default-spinner-tty"
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  set_agent_behavior $'#!/usr/bin/env bash\nsleep 0.3\nprintf \'feat: tty spinner\\n\'\n'
+
+  run run_in_repo_tty "$repo" --agent codex --vcs git
+
+  assert_success
+  assert_contains "$output" 'Generating commit message'
+}
+
 @test "--verbose matches vq behavior for multiline agent output" {
   local repo="$TEST_ROOT/verbose-vq-multiline"
   init_git_repo "$repo"
@@ -368,6 +391,23 @@ assert_contains() {
 
   assert_success
   assert_contains "$output" 'verbose stderr marker'
+}
+
+@test "--verbose does not show a spinner in interactive mode" {
+  local repo="$TEST_ROOT/verbose-no-spinner-tty"
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  set_agent_behavior $'#!/usr/bin/env bash\nsleep 0.3\nprintf \'verbose stderr marker\\n\' >&2\nprintf \'feat: verbose no spinner\\n\'\n'
+
+  run run_in_repo_tty "$repo" --agent codex --vcs git --verbose
+
+  assert_success
+  assert_contains "$output" 'verbose stderr marker'
+  if [[ "$output" == *'Generating commit message'* ]]; then
+    printf 'spinner output appeared in verbose tty mode\n' >&2
+    return 1
+  fi
 }
 
 @test "default mode stays quiet when stderr is not a terminal" {
