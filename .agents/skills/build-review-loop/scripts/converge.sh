@@ -9,6 +9,7 @@ set -euo pipefail
 # - <session-dir>/run/meta/tmux_cleanup.txt
 # - <session-dir>/run/meta/tmux_session_name.txt
 # - <session-dir>/run/meta/prompts.tsv
+# - <session-dir>/run/meta/prompts/pNNN-*
 # - <session-dir>/run/meta/agent_cmds.txt
 # - <session-dir>/run/loop/loop.log
 # - <session-dir>/run/sNNN/effective_prompt.md
@@ -31,7 +32,7 @@ converge.sh - run or resume a rotating agent loop
 
 USAGE
   converge.sh run [options]
-  converge.sh resume -s <path> [-n <n>] [-d]
+  converge.sh resume -s <path> [-n <n>|--additional-steps <n>] [--run-to-completion] [-d]
   converge.sh [options]   # shorthand for run
 
 RUN OPTIONS
@@ -58,7 +59,10 @@ RUN OPTIONAL
 
 RESUME OPTIONS
   -s, --session-dir   Existing session root to resume.
-  -n, --max-steps     New total max steps for this run. Only reassignment allowed.
+  -n, --additional-steps
+                  Additional steps to run from the current end.
+      --run-to-completion
+                  Enable run-to-completion for resumed steps and reset the streak.
   -d, --dry-run       Print remaining plan and exit.
 
   -h, --help      Show this help message.
@@ -67,7 +71,7 @@ EXAMPLES
   converge.sh run -A codex -p "You are builder" -f ./prompts/inspector.md -n 2
   converge.sh run -a "claude -p --permission-mode bypassPermissions" -s ./session -f ./prompts/judge.md -H
   converge.sh run -A codex -f ./prompts/builder.md --no-session-dir
-  converge.sh resume -s ./session -n 12
+  converge.sh resume -s ./session --additional-steps 4
 EOF
 }
 
@@ -155,6 +159,22 @@ sanitize_tmux_label() {
   printf '%s\n' "$safe"
 }
 
+build_prompt_snapshot_name() {
+  local index="$1" prompt_kind="$2" prompt_value="$3" prompt_label="$4" base_name safe_name
+  if [[ -n "$prompt_label" ]]; then
+    base_name="$prompt_label"
+  elif [[ "$prompt_kind" == "file" ]]; then
+    base_name="$(basename "$prompt_value")"
+  else
+    base_name="inline.md"
+  fi
+  if [[ "$base_name" == "inline" ]]; then
+    base_name="inline.md"
+  fi
+  safe_name="$(sanitize_tmux_label "$base_name" prompt.md 80)"
+  printf 'p%03d-%s\n' "$((index + 1))" "$safe_name"
+}
+
 build_tmux_session_name() {
   local provided="$1"
   if [[ -n "$provided" ]]; then
@@ -170,6 +190,49 @@ build_tmux_window_name() {
   stem="${base%.*}"
   safe="$(sanitize_tmux_label "$stem" step 24)"
   printf 's%03d-%s\n' "$step" "$safe"
+}
+
+write_prompt_snapshot() {
+  local snapshot_path="$1" prompt_kind="$2" prompt_value="$3" tmp_path
+  tmp_path="${snapshot_path}.tmp.$$"
+  mkdir -p "$(dirname "$snapshot_path")"
+  if [[ "$prompt_kind" == "file" ]]; then
+    cat "$prompt_value" > "$tmp_path"
+  else
+    printf '%s\n' "$prompt_value" > "$tmp_path"
+  fi
+  mv "$tmp_path" "$snapshot_path"
+}
+
+snapshot_prompts_into_metadata() {
+  local meta_dir="$1" prompts_dir="$meta_dir/prompts"
+  local idx prompt_kind prompt_value prompt_label snapshot_name snapshot_path
+  local -a stored_prompt_kinds=()
+  local -a stored_prompt_values=()
+  local -a stored_prompt_labels=()
+
+  mkdir -p "$prompts_dir"
+  for idx in "${!prompt_values[@]}"; do
+    prompt_kind="${prompt_kinds[$idx]}"
+    prompt_value="${prompt_values[$idx]}"
+    prompt_label="${prompt_labels[$idx]}"
+    snapshot_name="$(build_prompt_snapshot_name "$idx" "$prompt_kind" "$prompt_value" "$prompt_label")"
+    snapshot_path="$prompts_dir/$snapshot_name"
+    write_prompt_snapshot "$snapshot_path" "$prompt_kind" "$prompt_value"
+    stored_prompt_kinds+=("file")
+    stored_prompt_values+=("$snapshot_path")
+    if [[ -n "$prompt_label" ]]; then
+      stored_prompt_labels+=("$prompt_label")
+    elif [[ "$prompt_kind" == "file" ]]; then
+      stored_prompt_labels+=("$(basename "$prompt_value")")
+    else
+      stored_prompt_labels+=("inline")
+    fi
+  done
+
+  prompt_kinds=("${stored_prompt_kinds[@]}")
+  prompt_values=("${stored_prompt_values[@]}")
+  prompt_labels=("${stored_prompt_labels[@]}")
 }
 
 configure_tmux_window() {
@@ -322,7 +385,9 @@ handle_sigterm() {
 
 write_run_metadata() {
   local meta_dir="$1"
+  local idx prompt_label
   mkdir -p "$meta_dir"
+  snapshot_prompts_into_metadata "$meta_dir"
   printf '%s\n' "$max_steps" > "$meta_dir/max_steps.txt"
   printf '%s\n' "$handoff_enabled" > "$meta_dir/handoff_enabled.txt"
   printf '%s\n' "$run_to_completion" > "$meta_dir/run_to_completion.txt"
@@ -332,7 +397,8 @@ write_run_metadata() {
   : > "$meta_dir/prompts.tsv"
   : > "$meta_dir/agent_cmds.txt"
   for idx in "${!prompt_values[@]}"; do
-    printf '%s\t%s\n' "${prompt_kinds[$idx]}" "${prompt_values[$idx]}" >> "$meta_dir/prompts.tsv"
+    prompt_label="${prompt_labels[$idx]}"
+    printf '%s\t%s\t%s\n' "${prompt_kinds[$idx]}" "${prompt_values[$idx]}" "$prompt_label" >> "$meta_dir/prompts.tsv"
   done
   printf '%s\n' "${agent_cmds[@]}" > "$meta_dir/agent_cmds.txt"
 }
@@ -371,11 +437,13 @@ load_run_metadata() {
   prompt_kinds=()
   prompt_values=()
   prompt_labels=()
-  while IFS=$'\t' read -r prompt_kind prompt_value || [[ -n "$prompt_kind$prompt_value" ]]; do
+  while IFS=$'\t' read -r prompt_kind prompt_value prompt_label || [[ -n "$prompt_kind$prompt_value$prompt_label" ]]; do
     [[ -n "$prompt_kind" ]] || continue
     prompt_kinds+=("$prompt_kind")
     prompt_values+=("$prompt_value")
-    if [[ "$prompt_kind" == "file" ]]; then
+    if [[ -n "$prompt_label" ]]; then
+      prompt_labels+=("$prompt_label")
+    elif [[ "$prompt_kind" == "file" ]]; then
       prompt_labels+=("$(basename "$prompt_value")")
     else
       prompt_labels+=("inline")
@@ -613,7 +681,8 @@ dry_run=0
 cli_prompt_kinds=()
 cli_prompt_values=()
 agent_cmds=()
-resume_max_steps=""
+resume_additional_steps=""
+resume_reset_completion_streak=0
 
 trap 'handle_sigint' INT
 trap 'handle_sigterm' TERM
@@ -630,18 +699,41 @@ while [[ $# -gt 0 ]]; do
       session_dir_mode="disabled"
       shift
       ;;
-    -n|--max-steps)
+    -n)
       if [[ "$mode" == "resume" ]]; then
-        resume_max_steps="${2:-}"
+        resume_additional_steps="${2:-}"
       else
         max_steps="${2:-}"
       fi
       shift 2
       ;;
-    -d|--dry-run) dry_run=1; shift ;;
-    -p|--prompt|-f|--prompt-file|-a|--agent-cmd|-A|--agent-preset|--run-to-completion|-t|--tmux|-x|--tmux-cleanup|-T|--tmux-session-name|-H|--no-handoff)
+    --max-steps)
       if [[ "$mode" == "resume" ]]; then
-        echo "resume only accepts -s/--session-dir, -n/--max-steps, and -d/--dry-run." >&2
+        echo "resume uses --additional-steps (or -n), not --max-steps." >&2
+        exit 1
+      fi
+      max_steps="${2:-}"
+      shift 2
+      ;;
+    --additional-steps)
+      if [[ "$mode" != "resume" ]]; then
+        echo "--additional-steps is resume-only; use --max-steps for run." >&2
+        exit 1
+      fi
+      resume_additional_steps="${2:-}"
+      shift 2
+      ;;
+    --run-to-completion)
+      run_to_completion=1
+      if [[ "$mode" == "resume" ]]; then
+        resume_reset_completion_streak=1
+      fi
+      shift
+      ;;
+    -d|--dry-run) dry_run=1; shift ;;
+    -p|--prompt|-f|--prompt-file|-a|--agent-cmd|-A|--agent-preset|-t|--tmux|-x|--tmux-cleanup|-T|--tmux-session-name|-H|--no-handoff)
+      if [[ "$mode" == "resume" ]]; then
+        echo "resume only accepts -s/--session-dir, -n/--additional-steps, --run-to-completion, and -d/--dry-run." >&2
         exit 1
       fi
       case "$1" in
@@ -665,7 +757,6 @@ while [[ $# -gt 0 ]]; do
           agent_cmds+=("$(agent_preset_command "$preset")")
           shift 2
           ;;
-        --run-to-completion) run_to_completion=1; shift ;;
         -t|--tmux) use_tmux=1; shift ;;
         -x|--tmux-cleanup) tmux_cleanup=1; shift ;;
         -T|--tmux-session-name) tmux_session_name_requested="${2:-}"; shift 2 ;;
@@ -730,16 +821,19 @@ else
   meta_dir="$run_dir/meta"
   [[ -d "$run_dir" ]] || { echo "Cannot resume: run directory not found: $run_dir" >&2; exit 1; }
   load_run_metadata "$meta_dir"
+  last_completed_step="$(find_last_completed_step "$run_dir")"
 
-  if [[ -n "$resume_max_steps" ]]; then
-    require_positive_integer "$resume_max_steps" "--max-steps"
-    max_steps="$resume_max_steps"
+  if [[ "$resume_reset_completion_streak" -eq 1 ]]; then
+    run_to_completion=1
+  fi
+  if [[ -n "$resume_additional_steps" ]]; then
+    require_positive_integer "$resume_additional_steps" "--additional-steps"
+    max_steps=$((last_completed_step + resume_additional_steps))
   else
     max_steps="$stored_max_steps"
   fi
-  last_completed_step="$(find_last_completed_step "$run_dir")"
   if (( max_steps < last_completed_step )); then
-    echo "--max-steps must be >= last completed step ($last_completed_step)." >&2
+    echo "Resolved max steps must be >= last completed step ($last_completed_step)." >&2
     exit 1
   fi
   start_step=$((last_completed_step + 1))
@@ -818,10 +912,14 @@ if [[ "$use_tmux" -eq 1 ]]; then
 fi
 
 if [[ "$mode" == "resume" && "$run_to_completion" -eq 1 ]]; then
-  recompute_completion_streak "$run_dir" "$last_completed_step"
-  if (( completion_streak >= completion_streak_target )); then
-    echo "Completion already confirmed at step $last_completed_step; no remaining steps to run."
-    exit 0
+  if [[ "$resume_reset_completion_streak" -eq 1 ]]; then
+    completion_streak=0
+  else
+    recompute_completion_streak "$run_dir" "$last_completed_step"
+    if (( completion_streak >= completion_streak_target )); then
+      echo "Completion already confirmed at step $last_completed_step; no remaining steps to run."
+      exit 0
+    fi
   fi
 fi
 

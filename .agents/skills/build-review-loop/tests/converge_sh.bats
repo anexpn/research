@@ -332,6 +332,53 @@ EOF
   [[ "$output" == *"--prompt-file requires a non-empty value."* ]]
 }
 
+@test "stores inline prompts as session snapshot files for resume" {
+  session_dir="$TEST_ROOT/session"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt "Inline builder body." \
+    --agent-cmd /bin/cat \
+    --max-steps 1 \
+    --no-handoff
+
+  [ "$status" -eq 0 ]
+  [ -d "$session_dir/run/meta/prompts" ]
+  prompts_meta="$(<"$session_dir/run/meta/prompts.tsv")"
+  [[ "$prompts_meta" == *"$session_dir/run/meta/prompts/"* ]]
+  [[ "$prompts_meta" != *$'inline\tInline builder body.'* ]]
+
+  run bash "$SCRIPT_PATH" resume \
+    --session-dir "$session_dir" \
+    --additional-steps 1
+
+  [ "$status" -eq 0 ]
+  [[ "$(<"$session_dir/run/s002/stdout.log")" == *"Inline builder body."* ]]
+}
+
+@test "copies prompt files into the session so resume does not depend on the original path" {
+  session_dir="$TEST_ROOT/session"
+  prompt_file="$PROMPT_DIR/builder.md"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$prompt_file" \
+    --agent-cmd /bin/cat \
+    --max-steps 1 \
+    --no-handoff
+
+  [ "$status" -eq 0 ]
+  [ -d "$session_dir/run/meta/prompts" ]
+  rm "$prompt_file"
+
+  run bash "$SCRIPT_PATH" resume \
+    --session-dir "$session_dir" \
+    --additional-steps 1
+
+  [ "$status" -eq 0 ]
+  [[ "$(<"$session_dir/run/s002/stdout.log")" == *"Builder prompt body."* ]]
+}
+
 @test "defaults session dir to a temp folder and writes run artifacts" {
   agent_a="$BIN_DIR/agent-a"
   agent_b="$BIN_DIR/agent-b"
@@ -564,7 +611,16 @@ EOF
     --prompt-file "$PROMPT_DIR/builder.md"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"resume only accepts -s/--session-dir, -n/--max-steps, and -d/--dry-run."* ]]
+  [[ "$output" == *"resume only accepts -s/--session-dir, -n/--additional-steps, --run-to-completion, and -d/--dry-run."* ]]
+}
+
+@test "resume rejects --max-steps and points to --additional-steps" {
+  run bash "$SCRIPT_PATH" resume \
+    --session-dir "$TEST_ROOT/session" \
+    --max-steps 2
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"resume uses --additional-steps (or -n), not --max-steps."* ]]
 }
 
 @test "records non-zero agent exit in step artifacts and loop log" {
@@ -767,7 +823,7 @@ EOF
   [ -f "$fake_tmux_root/sessions/bats-tmux" ]
 }
 
-@test "resume continues from last step and allows max-step reassignment only" {
+@test "resume continues from last step and treats -n as additional steps" {
   session_dir="$TEST_ROOT/session"
   count_file="$TEST_ROOT/count.txt"
   printf '0\n' > "$count_file"
@@ -795,10 +851,11 @@ EOF
 
   run bash "$SCRIPT_PATH" resume \
     --session-dir "$session_dir" \
-    --max-steps 4
+    -n 2
   [ "$status" -eq 0 ]
   [[ "$output" == *"resume_from_step=3"* ]]
   [ -f "$session_dir/run/s004/exit_code.txt" ]
+  [ ! -f "$session_dir/run/s005/exit_code.txt" ]
   [[ "$(<"$session_dir/run/s003/stdout.log")" == *"run-3"* ]]
   [[ "$(<"$session_dir/run/s004/stdout.log")" == *"run-4"* ]]
 }
@@ -820,12 +877,13 @@ EOF
 
   run bash "$SCRIPT_PATH" resume \
     --session-dir "$session_dir" \
-    --max-steps 4 \
+    --additional-steps 2 \
     --dry-run
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"mode=resume"* ]]
   [[ "$output" == *"start_step=3"* ]]
+  [[ "$output" == *"max_steps=4"* ]]
   [[ "$output" == *"completion_mode=fixed_steps"* ]]
 }
 
@@ -856,11 +914,12 @@ EOF
 
   run bash "$SCRIPT_PATH" resume \
     --session-dir "$session_dir" \
-    --max-steps 12 \
+    --additional-steps 2 \
     --dry-run
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"start_step=11"* ]]
+  [[ "$output" == *"max_steps=12"* ]]
   [[ "$output" == *"[step 11]"* ]]
   [[ "$output" == *"[step 12]"* ]]
 }
@@ -887,7 +946,7 @@ EOF
 
   run bash "$SCRIPT_PATH" resume \
     --session-dir "$session_dir" \
-    --max-steps 5
+    --additional-steps 3
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"resume_from_step=3"* ]]
@@ -920,10 +979,42 @@ EOF
 
   run bash "$SCRIPT_PATH" resume \
     --session-dir "$session_dir" \
-    --max-steps 5
+    --additional-steps 5
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Completion already confirmed at step 2; no remaining steps to run."* ]]
+}
+
+@test "resume --run-to-completion resets the completion streak" {
+  session_dir="$TEST_ROOT/session"
+  sequence_file="$TEST_ROOT/judgements.txt"
+  count_file="$TEST_ROOT/count.txt"
+  agent_path="$BIN_DIR/agent"
+  printf 'complete\ncomplete\ncomplete\ncomplete\n' > "$sequence_file"
+  printf '0\n' > "$count_file"
+  make_sequence_completion_agent "$agent_path" "$sequence_file" "$count_file"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 5 \
+    --no-handoff \
+    --run-to-completion
+  [ "$status" -eq 0 ]
+  [ -f "$session_dir/run/s002/exit_code.txt" ]
+  [ ! -e "$session_dir/run/s003/exit_code.txt" ]
+
+  run bash "$SCRIPT_PATH" resume \
+    --session-dir "$session_dir" \
+    --additional-steps 3 \
+    --run-to-completion
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"resume_from_step=3"* ]]
+  [[ "$output" == *"Completion confirmed at step 4 after 2 consecutive complete judgements."* ]]
+  [ -f "$session_dir/run/s004/exit_code.txt" ]
+  [ ! -e "$session_dir/run/s005/exit_code.txt" ]
 }
 
 @test "tmux mode fails clearly when tmux is unavailable" {

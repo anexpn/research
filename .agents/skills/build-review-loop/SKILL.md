@@ -123,7 +123,7 @@ bash .agents/skills/build-review-loop/scripts/converge.sh run \
   -n 10
 ```
 
-If Human chose a custom session dir and it already contains `run/meta`, prefer `converge.sh resume -s "<session-dir>"` instead of starting a fresh run. Ask for a larger `--max-steps` value only when Human wants to continue beyond the stored total.
+If Human chose a custom session dir and it already contains `run/meta`, prefer `converge.sh resume -s "<session-dir>"` instead of starting a fresh run. Ask for a positive `--additional-steps` value only when Human wants to run more steps beyond the current end.
 
 ## Call out risky flags
 
