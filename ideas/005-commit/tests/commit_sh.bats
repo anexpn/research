@@ -6,7 +6,9 @@ setup() {
   export TEST_ROOT
   TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/commit-sh-tests.XXXXXX")"
   export STUB_BIN_DIR="$TEST_ROOT/bin"
+  export SYSTEM_BIN_DIR="$TEST_ROOT/system-bin"
   mkdir -p "$STUB_BIN_DIR"
+  mkdir -p "$SYSTEM_BIN_DIR"
 
   export AGENT_NAME_FILE="$TEST_ROOT/agent-name"
   export AGENT_ARGS_FILE="$TEST_ROOT/agent-args"
@@ -14,11 +16,23 @@ setup() {
   export AGENT_OUTPUT_FILE="$TEST_ROOT/agent-output"
   export AGENT_EXIT_CODE=0
 
+  link_system_command awk
+  link_system_command basename
+  link_system_command bash
+  link_system_command cat
+  link_system_command env
+  link_system_command git
+  link_system_command jj
+  link_system_command mkdir
+  link_system_command mktemp
+  link_system_command rm
+  link_system_command sed
+
   create_agent_stub codex
   create_agent_stub claude
   create_agent_stub cursor-agent
 
-  export PATH="$STUB_BIN_DIR:$PATH"
+  export PATH="$STUB_BIN_DIR:$SYSTEM_BIN_DIR"
 }
 
 teardown() {
@@ -43,6 +57,19 @@ fi
 exit "${AGENT_EXIT_CODE:-0}"
 EOF
   chmod +x "$STUB_BIN_DIR/$name"
+}
+
+link_system_command() {
+  local name=$1
+  local source_path
+
+  source_path="$(command -v "$name")"
+  ln -s "$source_path" "$SYSTEM_BIN_DIR/$name"
+}
+
+remove_agent_stub() {
+  local name=$1
+  rm -f "$STUB_BIN_DIR/$name"
 }
 
 init_git_repo() {
@@ -124,6 +151,48 @@ assert_contains() {
   assert_success
   [[ "$(jj -R "$repo" log -r @- -n 1 --no-graph -T 'description.first_line()')" == 'feat: inferred jj' ]]
   assert_contains "$(cat "$AGENT_STDIN_FILE")" 'Selected VCS: jj'
+}
+
+@test "agent inference prefers codex when --agent is omitted" {
+  local repo="$TEST_ROOT/agent-infers-codex"
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  set_agent_output 'feat: inferred codex'
+
+  run run_in_repo "$repo" --vcs git
+
+  assert_success
+  [[ "$(cat "$AGENT_NAME_FILE")" == 'codex' ]]
+}
+
+@test "agent inference falls back to claude when codex is unavailable" {
+  local repo="$TEST_ROOT/agent-infers-claude"
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  remove_agent_stub codex
+  set_agent_output 'feat: inferred claude'
+
+  run run_in_repo "$repo" --vcs git
+
+  assert_success
+  [[ "$(cat "$AGENT_NAME_FILE")" == 'claude' ]]
+}
+
+@test "agent inference fails clearly when no supported agent binary is on PATH" {
+  local repo="$TEST_ROOT/agent-infers-none"
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  remove_agent_stub codex
+  remove_agent_stub claude
+  remove_agent_stub cursor-agent
+
+  run run_in_repo "$repo" --vcs git
+
+  assert_failure
+  assert_contains "$output" 'Could not infer an agent preset. Looked for codex, claude, then cursor-agent on PATH.'
 }
 
 @test "--vcs overrides inference in a colocated repo" {

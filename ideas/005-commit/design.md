@@ -36,7 +36,7 @@ Implement a single `bash` script named `commit.sh`.
 The script will:
 
 1. infer the VCS, preferring `jj`
-2. infer or accept an agent preset
+2. infer or accept an agent preset, preferring installed CLIs on `PATH`
 3. collect the relevant diff
 4. collect recent commit subjects as style context
 5. build a prompt from a default template or override
@@ -62,7 +62,7 @@ commit.sh \
 
 Behavior notes:
 
-- `--agent` selects the built-in agent preset.
+- `--agent` selects the built-in agent preset and overrides inference.
 - `--vcs` overrides inference.
 - `--style conventional` is the default.
 - `--style repo` asks the agent to follow the repo’s dominant recent subject pattern instead of conventional commits.
@@ -71,7 +71,13 @@ Behavior notes:
 - `--prompt` injects explicit user guidance. It is required for `--style prompt` and optional otherwise.
 - `--agent-arg` is repeatable and appends extra CLI arguments after the preset defaults.
 
-The first cut should require `--agent`. Agent inference can be added later if it proves necessary.
+If `--agent` is omitted, the script should infer the preset from installed CLIs on `PATH` in this order:
+
+1. `codex`
+2. `claude`
+3. `cursor-agent`
+
+If none of those binaries are available, the script should fail with a clear error that names the searched order.
 
 ## VCS Detection And Diff Rules
 

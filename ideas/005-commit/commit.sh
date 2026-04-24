@@ -207,6 +207,19 @@ detect_vcs() {
   die 'Could not detect a supported VCS. Use --vcs git or --vcs jj.'
 }
 
+infer_agent_name() {
+  local candidate
+
+  for candidate in codex claude cursor-agent; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      printf '%s' "$candidate"
+      return
+    fi
+  done
+
+  die 'Could not infer an agent preset. Looked for codex, claude, then cursor-agent on PATH. Use --agent to choose explicitly.'
+}
+
 collect_diff() {
   local vcs_name=$1
   local diff_text
@@ -426,7 +439,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$agent_name" ]] || die 'The first version requires --agent.'
+if [[ -z "$agent_name" ]]; then
+  agent_name="$(infer_agent_name)"
+fi
 
 case "$style_mode" in
   conventional|repo|prompt)
