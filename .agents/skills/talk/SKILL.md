@@ -1,13 +1,13 @@
 ---
 name: talk
-description: Coordinate with another AI agent through tmux using a small XML message protocol. Use when Codex needs to send work to an agent in another tmux pane, request help from a peer agent, or respond to a structured tmux protocol message containing tmuxp-requester, tmuxp-replier, tmuxp-name, tmuxp-request, tmuxp-request-id, tmuxp-reply-id, tmuxp-reply, tmuxp-error, tmuxp-next-request-id, or tmuxp-next-request tags.
+description: Coordinate with another AI agent through tmux using a small XML message protocol. Use when Codex needs to send work to an agent in another tmux pane, request help from a peer agent, or respond to a structured tmux protocol message containing tmuxp-requester, tmuxp-replier, tmuxp-name, tmuxp-request, tmuxp-request-id, tmuxp-reply-id, tmuxp-reply, tmuxp-error, tmuxp-no-reply, tmuxp-next-request-id, or tmuxp-next-request tags.
 ---
 
 # Talk
 
 ## Overview
 
-Use this skill to communicate with another agent that is already running in a tmux pane. Send requests and replies as plain XML fragments so both sides can reliably identify the requester, identify the replier, correlate replies, distinguish successful answers from errors, and optionally continue into another request-reply turn.
+Use this skill to communicate with another agent that is already running in a tmux pane. Send requests and replies as plain XML fragments so both sides can reliably identify the requester, identify the replier, correlate messages, distinguish successful answers from errors, choose whether a request expects a reply, and optionally continue into another request turn.
 
 For the exact wire format, required tags, escaping rules, and examples, read `references/protocol.md`.
 
@@ -18,24 +18,30 @@ For the exact wire format, required tags, escaping rules, and examples, read `re
    - If the user gives a name such as `codex-review` instead of a pane id, run `<this-skill-directory>/scripts/tmuxp-info <name>` and use its `target: <pane-id>` output.
    - If `tmuxp-info` reports multiple matches, choose an explicit pane id from its candidate rows before sending.
    - This skill does not create windows, launch agents, or manage agent lifecycle.
-2. Put the pane that should receive the response in `<tmuxp-requester>`.
+2. Decide whether the request needs a reply.
+   - Use normal request/reply when you need a result, decision, review, diagnosis, generated artifact, confirmation, error report, or continued dialogue.
+   - Use `--no-reply` only for fire-and-forget coordination where a reply would add no value, such as status updates, cancellation notices, or ownership announcements.
+3. Put your pane in `<tmuxp-requester>`.
    - `<tmuxp-requester>` must be a tmux target that another agent can pass to `tmux send-keys -t`, such as `%12`, `agent-session:1.2`, or `:1.2`.
+   - Even with `<tmuxp-no-reply>true</tmuxp-no-reply>`, requester and request ids are useful origin and correlation metadata.
    - Put a human-readable label in optional `<tmuxp-name>` when useful, such as `codex-main` or `reviewer`.
-3. Generate a unique request id for each request that expects a reply.
+4. Generate a unique request id for each request.
    - Use compact ids such as `req-20260426-153012-a`.
    - Keep the same request id when replying and add a fresh reply id.
-4. Send one XML protocol fragment to the target pane, preferably with the helper at `<this-skill-directory>/scripts/tmuxp`.
+5. Send one XML protocol fragment to the target pane, preferably with the helper at `<this-skill-directory>/scripts/tmuxp`.
    - Do not wrap the protocol in Markdown fences.
    - Keep prose inside the XML payload, not outside it.
    - For multi-line requests, encode line breaks inside `<tmuxp-request>` instead of sending physical newline characters to the target pane.
-5. Stop after sending.
+6. Stop after sending.
    - Do not run `tmux capture-pane`, `sleep`, loops, repeated `tmuxp-info`, or any polling commands to wait for a reply.
-   - Do not inspect the target pane to read the answer; the reply must arrive as a tmuxp protocol message in your requester pane.
-   - The receiving agent is responsible for sending a reply back to the tmux target in `<tmuxp-requester>`.
-6. When receiving a tmuxp request, do the requested work if it is in scope, then send a tmuxp reply or error to the requester pane.
-7. When receiving a tmuxp reply or error with `<tmuxp-next-request-id>` and `<tmuxp-next-request>`, treat it as a dialogue turn.
+   - Do not inspect the target pane to read an answer.
+   - For no-reply requests, do not expect or wait for a reply.
+   - For normal requests, the receiving agent is responsible for sending a reply back to the tmux target in `<tmuxp-requester>`.
+7. When receiving a tmuxp request, do the requested work if it is in scope. Send a tmuxp reply or error to the requester pane unless `<tmuxp-no-reply>true</tmuxp-no-reply>` is present.
+8. When receiving a tmuxp reply or error with `<tmuxp-next-request-id>` and `<tmuxp-next-request>`, treat it as a dialogue turn.
    - First process the reply or error as the answer to your original request.
-   - Then answer `<tmuxp-next-request>` as a new request from the replier, using `<tmuxp-next-request-id>` as the request id to echo in your reply.
+   - Then process `<tmuxp-next-request>` as a new request from the replier, using `<tmuxp-next-request-id>` as its request id.
+   - If `<tmuxp-no-reply>true</tmuxp-no-reply>` is attached to the next request, do not send a reply or error for that next request.
 
 ## Helper
 
@@ -49,6 +55,12 @@ Use the included send-only helper for normal requests and replies. It sends to a
 
 ```bash
 <this-skill-directory>/scripts/tmuxp request --to <target-pane> --name codex-main -- "Summarize the failing test output."
+```
+
+For fire-and-forget requests, add `--no-reply`:
+
+```bash
+<this-skill-directory>/scripts/tmuxp request --to <target-pane> --name codex-main --no-reply -- "I started the test run."
 ```
 
 For longer messages, use stdin:
@@ -70,6 +82,12 @@ To continue the dialogue from a reply, attach a next request:
 <this-skill-directory>/scripts/tmuxp reply --to <requester-pane> --request-id <request-id> --name reviewer --next-request "Can you run the focused test now?" -- "I updated the parser."
 ```
 
+If the next request does not need a reply, add `--no-reply` to the reply or error command:
+
+```bash
+<this-skill-directory>/scripts/tmuxp reply --to <requester-pane> --request-id <request-id> --name reviewer --next-request "I started the focused test run." --no-reply -- "I updated the parser."
+```
+
 Do not run a bare `scripts/tmuxp` or `scripts/tmuxp-info` from the repository or shell cwd. Resolve helpers relative to this skill directory, then invoke those paths.
 
 The helper resolves the current pane for `auto` requester or replier values during real sends, generates ids when requested, escapes payloads safely into a single-line XML fragment, pastes the fragment through a temporary tmux buffer that is deleted after paste, waits briefly, and submits it with `tmux send-keys Enter`. With `--dry-run`, unresolved `auto` pane values print as the literal placeholder `auto`; pass explicit pane values when the dry-run output must be a sendable protocol fragment.
@@ -83,9 +101,11 @@ When a tmuxp request arrives in your pane:
 - Parse the tmuxp tags before acting.
 - Treat `<tmuxp-request>` content as the task payload.
 - Do not invent missing context; ask back with a tmuxp reply if the request is ambiguous.
-- Include the original `<tmuxp-request-id>` in every reply or error.
-- Include a new `<tmuxp-reply-id>` in every reply or error.
+- If `<tmuxp-no-reply>true</tmuxp-no-reply>` is present, do the requested work if it is in scope, then stop without sending a reply or error.
+- Otherwise include the original `<tmuxp-request-id>` in every reply or error.
+- Otherwise include a new `<tmuxp-reply-id>` in every reply or error.
 - If a reply or error includes `<tmuxp-next-request-id>` and `<tmuxp-next-request>`, process those as a new request from the replier after processing the reply.
+- If that next request also includes `<tmuxp-no-reply>true</tmuxp-no-reply>`, process it without replying.
 - Keep final replies concise and actionable.
 
 ## Reference

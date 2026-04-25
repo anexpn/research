@@ -6,15 +6,16 @@ usage() {
   cat <<'EOF'
 usage:
   tmuxp request --to <pane> [--name <name>] [--stdin] [--dry-run]
-                 [--requester <pane|auto>] [--request-id <id|auto>] [--] <message>
+                 [--requester <pane|auto>] [--request-id <id|auto>]
+                 [--no-reply] [--] <message>
   tmuxp reply   --to <pane> --request-id <id> [--name <name>] [--stdin] [--dry-run]
                  [--requester <pane|auto|target>] [--replier <pane|auto>]
                  [--reply-id <id|auto>] [--next-request-id <id|auto>]
-                 [--next-request <message>] [--] <message>
+                 [--next-request <message>] [--no-reply] [--] <message>
   tmuxp error   --to <pane> --request-id <id> [--name <name>] [--stdin] [--dry-run]
                  [--requester <pane|auto|target>] [--replier <pane|auto>]
                  [--reply-id <id|auto>] [--next-request-id <id|auto>]
-                 [--next-request <message>] [--] <message>
+                 [--next-request <message>] [--no-reply] [--] <message>
 EOF
 }
 
@@ -169,6 +170,9 @@ request_xml() {
     append_tag tmuxp-name "$name"
   fi
   append_tag tmuxp-request-id "$resolved_request_id"
+  if ((no_reply)); then
+    append_tag tmuxp-no-reply true
+  fi
   append_tag tmuxp-request "$message"
 }
 
@@ -208,6 +212,9 @@ response_xml() {
       resolved_next_request_id=$next_request_id
     fi
     append_tag tmuxp-next-request-id "$resolved_next_request_id"
+    if ((no_reply)); then
+      append_tag tmuxp-no-reply true
+    fi
     append_tag tmuxp-next-request "$next_request"
   elif ((next_request_id_set)); then
     die 'use --next-request-id only with --next-request'
@@ -272,6 +279,9 @@ parse_args() {
         fi
         shift
         request_id=$1
+        ;;
+      --no-reply)
+        no_reply=1
         ;;
       --replier)
         if [[ $command_name == request ]]; then
@@ -348,6 +358,7 @@ main() {
   requester=auto
   replier=auto
   request_id=auto
+  no_reply=0
   reply_id=auto
   next_request=''
   next_request_set=0
@@ -377,6 +388,13 @@ main() {
 
   if [[ -z $to ]]; then
     die 'the following arguments are required: --to'
+  fi
+  if ((no_reply)); then
+    if [[ $command_name == request ]]; then
+      :
+    elif ((! next_request_set)); then
+      die 'use --no-reply only with --next-request on reply or error'
+    fi
   fi
   if [[ $command_name != request && -z $request_id ]]; then
     die 'the following arguments are required: --request-id'

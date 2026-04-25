@@ -36,6 +36,7 @@ assert_contains() {
   assert_contains "$output" 'tmuxp request --to <pane>'
   assert_contains "$output" 'tmuxp reply   --to <pane> --request-id <id>'
   assert_contains "$output" 'tmuxp error   --to <pane> --request-id <id>'
+  assert_contains "$output" '--no-reply'
   assert_contains "$output" '--next-request <message>'
 }
 
@@ -50,6 +51,20 @@ assert_contains() {
 
   assert_success
   [[ "$output" == '<tmuxp-requester>%12</tmuxp-requester><tmuxp-name>codex-main</tmuxp-name><tmuxp-request-id>req-test</tmuxp-request-id><tmuxp-request>Review the diff</tmuxp-request>' ]]
+}
+
+@test "no-reply request dry-run builds an async protocol fragment" {
+  run "$SCRIPT_PATH" request \
+    --dry-run \
+    --to %15 \
+    --no-reply \
+    --requester %12 \
+    --request-id req-test \
+    --name codex-main \
+    -- "I started the test run."
+
+  assert_success
+  [[ "$output" == '<tmuxp-requester>%12</tmuxp-requester><tmuxp-name>codex-main</tmuxp-name><tmuxp-request-id>req-test</tmuxp-request-id><tmuxp-no-reply>true</tmuxp-no-reply><tmuxp-request>I started the test run.</tmuxp-request>' ]]
 }
 
 @test "reply dry-run builds a successful reply fragment" {
@@ -143,6 +158,13 @@ assert_contains() {
   assert_contains "$output" '<tmuxp-request>line one&#10;line two&#10;</tmuxp-request>'
 }
 
+@test "no-reply stdin payload encodes newlines as XML character references" {
+  run bash -c 'printf "line one\nline two\n" | "$1" request --dry-run --to %15 --requester %12 --request-id req-test --no-reply --stdin' _ "$SCRIPT_PATH"
+
+  assert_success
+  [[ "$output" == '<tmuxp-requester>%12</tmuxp-requester><tmuxp-request-id>req-test</tmuxp-request-id><tmuxp-no-reply>true</tmuxp-no-reply><tmuxp-request>line one&#10;line two&#10;</tmuxp-request>' ]]
+}
+
 @test "rejects stdin combined with trailing message text" {
   run "$SCRIPT_PATH" request \
     --dry-run \
@@ -204,6 +226,64 @@ assert_contains() {
 
   assert_failure
   assert_contains "$output" 'tmuxp: unrecognized argument: --next-request'
+}
+
+@test "reply dry-run can attach a no-reply next request" {
+  run "$SCRIPT_PATH" reply \
+    --dry-run \
+    --to %12 \
+    --request-id req-test \
+    --reply-id rep-test \
+    --replier %15 \
+    --next-request-id req-next \
+    --next-request "I started the focused test run." \
+    --no-reply \
+    -- "Done"
+
+  assert_success
+  [[ "$output" == '<tmuxp-requester>%12</tmuxp-requester><tmuxp-replier>%15</tmuxp-replier><tmuxp-request-id>req-test</tmuxp-request-id><tmuxp-reply-id>rep-test</tmuxp-reply-id><tmuxp-reply>Done</tmuxp-reply><tmuxp-next-request-id>req-next</tmuxp-next-request-id><tmuxp-no-reply>true</tmuxp-no-reply><tmuxp-next-request>I started the focused test run.</tmuxp-next-request>' ]]
+}
+
+@test "error dry-run can attach a no-reply next request" {
+  run "$SCRIPT_PATH" error \
+    --dry-run \
+    --to %12 \
+    --request-id req-test \
+    --reply-id rep-test \
+    --replier %15 \
+    --next-request-id req-next \
+    --next-request "I am cancelling the duplicate investigation." \
+    --no-reply \
+    -- "Cannot inspect the target pane."
+
+  assert_success
+  [[ "$output" == '<tmuxp-requester>%12</tmuxp-requester><tmuxp-replier>%15</tmuxp-replier><tmuxp-request-id>req-test</tmuxp-request-id><tmuxp-reply-id>rep-test</tmuxp-reply-id><tmuxp-error>Cannot inspect the target pane.</tmuxp-error><tmuxp-next-request-id>req-next</tmuxp-next-request-id><tmuxp-no-reply>true</tmuxp-no-reply><tmuxp-next-request>I am cancelling the duplicate investigation.</tmuxp-next-request>' ]]
+}
+
+@test "reply rejects no-reply without next request" {
+  run "$SCRIPT_PATH" reply \
+    --dry-run \
+    --to %12 \
+    --request-id req-test \
+    --no-reply \
+    -- "Done"
+
+  assert_failure
+  assert_contains "$output" 'tmuxp: use --no-reply only with --next-request on reply or error'
+}
+
+@test "reply accepts no-reply with next request id" {
+  run "$SCRIPT_PATH" reply \
+    --dry-run \
+    --to %12 \
+    --request-id req-test \
+    --next-request "Follow up" \
+    --next-request-id req-next \
+    --no-reply \
+    -- "Done"
+
+  assert_success
+  assert_contains "$output" '<tmuxp-next-request-id>req-next</tmuxp-next-request-id><tmuxp-no-reply>true</tmuxp-no-reply><tmuxp-next-request>Follow up</tmuxp-next-request>'
 }
 
 @test "default request dry-run does not require an accessible tmux client" {
