@@ -605,6 +605,16 @@ EOF
   [[ "$output" == *"agent_cmd=codex exec --dangerously-bypass-approvals-and-sandbox -"* ]]
 }
 
+@test "agent source defaults to codex preset" {
+  run bash "$SCRIPT_PATH" run \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --max-steps 1 \
+    --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"agent_cmd=codex exec --dangerously-bypass-approvals-and-sandbox -"* ]]
+}
+
 @test "resume rejects run-only options" {
   run bash "$SCRIPT_PATH" resume \
     --session-dir "$TEST_ROOT/session" \

@@ -27,11 +27,13 @@ Use this skill to run a two-role rotating loop with the bundled prompts, `script
 
 ## Use these defaults
 
-- Store prompt files.
-- Write prompt files next to the design spec:
+- Do not store prompt files.
+- Pass the rendered Builder and Reviewer prompt text inline with `-p` / `--prompt`.
+- Use preset `codex` as the agent source for both roles.
+- Use one agent source for both roles.
+- When Human asks to store prompt files, write them next to the design spec:
   - `build-review-loop.builder.prompt.md`
   - `build-review-loop.reviewer.prompt.md`
-- Use one agent source for both roles.
 - Use `--max-steps 10`.
 - Use session storage with `converge.sh`'s default temp session dir.
 - Keep `--tmux`, `--tmux-cleanup`, `--tmux-session-name`, and `--dry-run` unset unless Human explicitly asks for them.
@@ -42,32 +44,33 @@ Use this skill to run a two-role rotating loop with the bundled prompts, `script
 1. Ask for the design spec path if it is missing.
 2. Ask for the initial settings selection with these concrete multi-select options:
    - `Use all default settings`
-   - `Do not store prompt files`
+   - `Store prompt files next to the design spec`
    - `Use different agent sources for Builder and Reviewer`
+   - `Choose a different shared agent source`
    - `Set max steps to 4`
    - `Set max steps to 20`
    - `Choose a different session directory`
    - `Add Builder-specific requirements`
    - `Add Reviewer-specific requirements`
-   Show the defaults in the question text.
+     Show the defaults in the question text: no stored prompt files, inline `-p` prompt arguments, preset `codex`, max steps 10, default temp session dir.
 3. If Builder-specific requirements were selected, ask for them using the options in `references/requirement-options.md`.
 4. If Reviewer-specific requirements were selected, ask for them using the options in `references/requirement-options.md`.
-5. Ask for agent source selection in all flows.
-   Use one question when both roles share the same source.
+5. Ask for agent source selection only when Human selected `Choose a different shared agent source` or `Use different agent sources for Builder and Reviewer`.
+   Use one question when both roles share the same non-default source.
    Use one question per role when Human selected split sources.
    Offer these choices:
-   - `Use preset codex`
    - `Use preset claude`
    - `Use preset cursor-agent`
+   - `Use preset codex`
    - `Provide a custom agent command`
 6. If Human selected `Provide a custom agent command`, ask only for the command string for the relevant role.
 7. If Human selected `Choose a different session directory`, ask this exact three-option question:
    - `Use the default temp session directory`
    - `Use a different session directory`
    - `Do not use a session directory`
-   Ask for a free-text path only if Human chooses `Use a different session directory`.
+     Ask for a free-text path only if Human chooses `Use a different session directory`.
 
-If Human selects only `Use all default settings`, keep every default and still ask only for agent source selection.
+If Human selects only `Use all default settings`, keep every default and do not ask for agent source selection. The default agent preset is `codex`.
 
 Do not ask a separate prompt-storage confirmation question. The initial settings selection already resolves that decision.
 
@@ -100,11 +103,21 @@ Use these bundled files:
 - `references/requirement-options.md`
 - `scripts/render_prompts.py`
 
-If Human chose not to store prompt files, do not write them. Use that mode only for run-now execution. If Human wants to self-run, require stored prompt files so the final command is stable and reviewable.
+If Human keeps the default and does not store prompt files, do not write prompt files. Render the same prompt content from the bundled templates in memory and pass it to `converge.sh` with repeated `-p` / `--prompt` arguments:
+
+```bash
+bash .agents/skills/build-review-loop/scripts/converge.sh run \
+  -p "<rendered Builder prompt text>" \
+  -p "<rendered Reviewer prompt text>"
+```
 
 ## Assemble the converge command
 
+- Default `codex` does not require an agent flag; `converge.sh run` uses preset `codex` when no `-a` or `-A` is provided.
+- Treat an omitted agent source as preset `codex` for risk review.
 - Use `-A` for presets and `-a` for custom commands.
+- Use `-p` / `--prompt` for inline prompt text when prompt files are not stored.
+- Use `-f` / `--prompt-file` for stored prompt files.
 - Rotate Builder then Reviewer prompt sources in order.
 - Use `-s` only when a custom session dir is enabled.
 - Use `--no-session-dir` when Human explicitly chose not to use a session directory.
@@ -117,10 +130,16 @@ Default shape:
 
 ```bash
 bash .agents/skills/build-review-loop/scripts/converge.sh run \
-  -A codex \
+  -p "<rendered Builder prompt text>" \
+  -p "<rendered Reviewer prompt text>"
+```
+
+Stored-prompt shape:
+
+```bash
+bash .agents/skills/build-review-loop/scripts/converge.sh run \
   -f "<design-spec-dir>/build-review-loop.builder.prompt.md" \
-  -f "<design-spec-dir>/build-review-loop.reviewer.prompt.md" \
-  -n 10
+  -f "<design-spec-dir>/build-review-loop.reviewer.prompt.md"
 ```
 
 If Human chose a custom session dir and it already contains `run/meta`, prefer `converge.sh resume -s "<session-dir>"` instead of starting a fresh run. Ask for a positive `--additional-steps` value only when Human wants to run more steps beyond the current end.
@@ -133,6 +152,7 @@ Before presenting the final command, inspect both:
 - the resolved agent commands behind any selected presets
 
 A command that only shows `-A codex`, `-A claude`, or `-A cursor-agent` can still carry risky flags through the preset expansion, and those flags must be called out explicitly.
+A command with no `-a` or `-A` also carries the default `codex` preset expansion and must be reviewed as `codex`.
 
 Current preset expansions to use for the final risk review:
 

@@ -42,6 +42,7 @@ RUN OPTIONS
   Agent source:
     -a, --agent-cmd     Agent command, repeatable.
     -A, --agent-preset  Agent preset name (codex, claude, cursor-agent), repeatable.
+                       Defaults to codex when no agent source is provided.
 
 RUN OPTIONAL
   -s, --session-dir   Session root for run artifacts. Defaults to a new temp dir.
@@ -783,7 +784,9 @@ if [[ "$mode" == "run" ]]; then
     usage >&2
     exit 1
   fi
-  [[ ${#agent_cmds[@]} -gt 0 ]] || { usage >&2; exit 1; }
+  if [[ ${#agent_cmds[@]} -eq 0 ]]; then
+    agent_cmds+=("$(agent_preset_command codex)")
+  fi
   require_positive_integer "$max_steps" "--max-steps"
   for agent_cmd in "${agent_cmds[@]}"; do
     [[ -n "$agent_cmd" ]] || { echo "--agent-cmd requires a non-empty value." >&2; exit 1; }
