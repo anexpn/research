@@ -9,10 +9,12 @@ usage:
                  [--requester <pane|auto>] [--request-id <id|auto>] [--] <message>
   tmuxp reply   --to <pane> --request-id <id> [--name <name>] [--stdin] [--dry-run]
                  [--requester <pane|auto|target>] [--replier <pane|auto>]
-                 [--reply-id <id|auto>] [--] <message>
+                 [--reply-id <id|auto>] [--next-request-id <id|auto>]
+                 [--next-request <message>] [--] <message>
   tmuxp error   --to <pane> --request-id <id> [--name <name>] [--stdin] [--dry-run]
                  [--requester <pane|auto|target>] [--replier <pane|auto>]
-                 [--reply-id <id|auto>] [--] <message>
+                 [--reply-id <id|auto>] [--next-request-id <id|auto>]
+                 [--next-request <message>] [--] <message>
 EOF
 }
 
@@ -175,6 +177,7 @@ response_xml() {
   local resolved_requester
   local resolved_replier
   local resolved_reply_id
+  local resolved_next_request_id
 
   resolved_requester=$(resolve_pane "$requester" "$to")
   resolved_replier=$(resolve_pane "$replier")
@@ -195,6 +198,20 @@ response_xml() {
   append_tag tmuxp-request-id "$request_id"
   append_tag tmuxp-reply-id "$resolved_reply_id"
   append_tag "$payload_tag" "$message"
+  if ((next_request_set)); then
+    if [[ -z $next_request ]]; then
+      die 'next request must not be empty'
+    fi
+    if [[ $next_request_id == auto ]]; then
+      resolved_next_request_id=$(compact_id req)
+    else
+      resolved_next_request_id=$next_request_id
+    fi
+    append_tag tmuxp-next-request-id "$resolved_next_request_id"
+    append_tag tmuxp-next-request "$next_request"
+  elif ((next_request_id_set)); then
+    die 'use --next-request-id only with --next-request'
+  fi
 }
 
 send_to_tmux() {
@@ -276,6 +293,28 @@ parse_args() {
         shift
         reply_id=$1
         ;;
+      --next-request-id)
+        if [[ $command_name == request ]]; then
+          die 'unrecognized argument: --next-request-id'
+        fi
+        if (($# < 2)); then
+          die 'argument --next-request-id requires a value'
+        fi
+        shift
+        next_request_id=$1
+        next_request_id_set=1
+        ;;
+      --next-request)
+        if [[ $command_name == request ]]; then
+          die 'unrecognized argument: --next-request'
+        fi
+        if (($# < 2)); then
+          die 'argument --next-request requires a value'
+        fi
+        shift
+        next_request=$1
+        next_request_set=1
+        ;;
       --)
         shift
         message_parts=("$@")
@@ -310,6 +349,10 @@ main() {
   replier=auto
   request_id=auto
   reply_id=auto
+  next_request=''
+  next_request_set=0
+  next_request_id=auto
+  next_request_id_set=0
   message=''
   xml=''
   message_parts=()

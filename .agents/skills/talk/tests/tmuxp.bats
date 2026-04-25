@@ -36,6 +36,7 @@ assert_contains() {
   assert_contains "$output" 'tmuxp request --to <pane>'
   assert_contains "$output" 'tmuxp reply   --to <pane> --request-id <id>'
   assert_contains "$output" 'tmuxp error   --to <pane> --request-id <id>'
+  assert_contains "$output" '--next-request <message>'
 }
 
 @test "request dry-run builds a protocol fragment with explicit ids" {
@@ -65,6 +66,21 @@ assert_contains() {
   [[ "$output" == '<tmuxp-requester>%12</tmuxp-requester><tmuxp-replier>%15</tmuxp-replier><tmuxp-name>reviewer</tmuxp-name><tmuxp-request-id>req-test</tmuxp-request-id><tmuxp-reply-id>rep-test</tmuxp-reply-id><tmuxp-reply>No issues found.</tmuxp-reply>' ]]
 }
 
+@test "reply dry-run can attach a next request for dialogue" {
+  run "$SCRIPT_PATH" reply \
+    --dry-run \
+    --to %12 \
+    --request-id req-test \
+    --reply-id rep-test \
+    --replier %15 \
+    --next-request-id req-next \
+    --next-request "Can you run the focused test now?" \
+    -- "I updated the parser."
+
+  assert_success
+  [[ "$output" == '<tmuxp-requester>%12</tmuxp-requester><tmuxp-replier>%15</tmuxp-replier><tmuxp-request-id>req-test</tmuxp-request-id><tmuxp-reply-id>rep-test</tmuxp-reply-id><tmuxp-reply>I updated the parser.</tmuxp-reply><tmuxp-next-request-id>req-next</tmuxp-next-request-id><tmuxp-next-request>Can you run the focused test now?</tmuxp-next-request>' ]]
+}
+
 @test "error dry-run builds an error reply fragment" {
   run "$SCRIPT_PATH" error \
     --dry-run \
@@ -78,6 +94,21 @@ assert_contains() {
   [[ "$output" == '<tmuxp-requester>%12</tmuxp-requester><tmuxp-replier>%15</tmuxp-replier><tmuxp-request-id>req-test</tmuxp-request-id><tmuxp-reply-id>rep-test</tmuxp-reply-id><tmuxp-error>Cannot inspect the target pane.</tmuxp-error>' ]]
 }
 
+@test "error dry-run can attach a next request for dialogue" {
+  run "$SCRIPT_PATH" error \
+    --dry-run \
+    --to %12 \
+    --request-id req-test \
+    --reply-id rep-test \
+    --replier %15 \
+    --next-request-id req-next \
+    --next-request "Send me the failing command." \
+    -- "Cannot inspect the target pane."
+
+  assert_success
+  [[ "$output" == '<tmuxp-requester>%12</tmuxp-requester><tmuxp-replier>%15</tmuxp-replier><tmuxp-request-id>req-test</tmuxp-request-id><tmuxp-reply-id>rep-test</tmuxp-reply-id><tmuxp-error>Cannot inspect the target pane.</tmuxp-error><tmuxp-next-request-id>req-next</tmuxp-next-request-id><tmuxp-next-request>Send me the failing command.</tmuxp-next-request>' ]]
+}
+
 @test "dry-run escapes XML metacharacters in payloads" {
   run "$SCRIPT_PATH" request \
     --dry-run \
@@ -88,6 +119,21 @@ assert_contains() {
 
   assert_success
   assert_contains "$output" '<tmuxp-request>Use A&amp;B &lt; C &gt; D</tmuxp-request>'
+}
+
+@test "dry-run escapes XML metacharacters in next request payloads" {
+  run "$SCRIPT_PATH" reply \
+    --dry-run \
+    --to %12 \
+    --request-id req-test \
+    --reply-id rep-test \
+    --replier %15 \
+    --next-request-id req-next \
+    --next-request 'Check A&B < C > D' \
+    -- "Done"
+
+  assert_success
+  assert_contains "$output" '<tmuxp-next-request>Check A&amp;B &lt; C &gt; D</tmuxp-next-request>'
 }
 
 @test "stdin payload encodes newlines as XML character references" {
@@ -119,6 +165,45 @@ assert_contains() {
 
   assert_failure
   assert_contains "$output" 'tmuxp: message must not be empty'
+}
+
+@test "next request id without next request fails" {
+  run "$SCRIPT_PATH" reply \
+    --dry-run \
+    --to %12 \
+    --request-id req-test \
+    --reply-id rep-test \
+    --next-request-id req-next \
+    -- "Done"
+
+  assert_failure
+  assert_contains "$output" 'tmuxp: use --next-request-id only with --next-request'
+}
+
+@test "empty next request fails" {
+  run "$SCRIPT_PATH" reply \
+    --dry-run \
+    --to %12 \
+    --request-id req-test \
+    --reply-id rep-test \
+    --next-request "" \
+    -- "Done"
+
+  assert_failure
+  assert_contains "$output" 'tmuxp: next request must not be empty'
+}
+
+@test "request rejects next request options" {
+  run "$SCRIPT_PATH" request \
+    --dry-run \
+    --to %15 \
+    --requester %12 \
+    --request-id req-test \
+    --next-request "Follow up" \
+    -- "Review the diff"
+
+  assert_failure
+  assert_contains "$output" 'tmuxp: unrecognized argument: --next-request'
 }
 
 @test "default request dry-run does not require an accessible tmux client" {

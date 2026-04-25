@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+usage:
+  tmuxp-info [query]
+
+Print the current tmux pane and available panes. With a query, resolve a
+matching pane id, window id, window name, or current path for tmuxp --to.
+EOF
+}
+
+die() {
+  printf 'tmuxp-info: %s\n' "$*" >&2
+  exit 1
+}
+
+active_marker() {
+  if [[ $1 == 1 ]]; then
+    printf '*'
+  else
+    printf '-'
+  fi
+}
+
+print_rows() {
+  local rows=$1
+  local window_name
+  local window_id
+  local pane_id
+  local pane_active
+  local pane_path
+
+  printf 'active\tpane-id\twindow-id\twindow\tpath\n'
+  while IFS=$'\t' read -r window_name window_id pane_id pane_active pane_path; do
+    [[ -n ${pane_id:-} ]] || continue
+    printf '%s\t%s\t%s\t%s\t%s\n' "$(active_marker "$pane_active")" "$pane_id" "$window_id" "$window_name" "$pane_path"
+  done <<<"$rows"
+}
+
+matches_query() {
+  local query=$1
+  local window_name=$2
+  local window_id=$3
+  local pane_id=$4
+  local pane_path=$5
+
+  [[ $pane_id == "$query" ]] ||
+    [[ ${pane_id#%} == "$query" ]] ||
+    [[ $window_id == "$query" ]] ||
+    [[ ${window_id#@} == "$query" ]] ||
+    [[ $window_name == *"$query"* ]] ||
+    [[ $pane_path == *"$query"* ]]
+}
+
+main() {
+  local query=${1-}
+  local current_pane
+  local rows
+  local window_name
+  local window_id
+  local pane_id
+  local pane_active
+  local pane_path
+  local match_count=0
+  local matches=''
+  local target=''
+
+  case "${query:-}" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+  esac
+
+  if (($# > 1)); then
+    die 'expected zero or one query'
+  fi
+
+  current_pane=$(tmux display-message -p '#{pane_id}') || die 'tmux command failed: tmux display-message'
+  rows=$(tmux list-panes -a -F '#{window_name}	#{window_id}	#{pane_id}	#{pane_active}	#{pane_current_path}') || die 'tmux command failed: tmux list-panes'
+
+  printf 'current-pane: %s\n' "$current_pane"
+
+  if [[ -z ${query:-} ]]; then
+    print_rows "$rows"
+    return
+  fi
+
+  while IFS=$'\t' read -r window_name window_id pane_id pane_active pane_path; do
+    [[ -n ${pane_id:-} ]] || continue
+    if matches_query "$query" "$window_name" "$window_id" "$pane_id" "$pane_path"; then
+      match_count=$((match_count + 1))
+      target=$pane_id
+      matches+="${window_name}"$'\t'"${window_id}"$'\t'"${pane_id}"$'\t'"${pane_active}"$'\t'"${pane_path}"$'\n'
+    fi
+  done <<<"$rows"
+
+  if ((match_count == 0)); then
+    printf 'query: %s\n' "$query" >&2
+    die 'no matching tmux pane'
+  fi
+
+  if ((match_count > 1)); then
+    printf 'query: %s\n' "$query" >&2
+    printf 'multiple matching tmux panes; choose an explicit pane id:\n' >&2
+    print_rows "$matches" >&2
+    exit 1
+  fi
+
+  printf 'query: %s\n' "$query"
+  printf 'target: %s\n' "$target"
+  print_rows "$matches"
+}
+
+main "$@"
