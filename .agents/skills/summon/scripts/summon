@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+usage:
+  summon codex [--name <name>] [--cd <dir>] [--mode shared|isolated]
+               [--layout window|pane] [--socket <socket-name>]
+               [--session <session-name>] [--dry-run] [-- <initial-prompt>]
+EOF
+}
+
+die() {
+  printf 'summon: %s\n' "$*" >&2
+  exit 1
+}
+
+shell_join() {
+  local first=1
+  local arg
+
+  for arg in "$@"; do
+    if ((first)); then
+      first=0
+    else
+      printf ' '
+    fi
+    printf '%q' "$arg"
+  done
+}
+
+join_prompt() {
+  local first=1
+  local part
+
+  prompt=''
+  for part in "$@"; do
+    if ((first)); then
+      prompt=$part
+      first=0
+    else
+      prompt+=" $part"
+    fi
+  done
+}
+
+resolve_cwd() {
+  local dir=$1
+
+  [[ -d $dir ]] || die "working directory does not exist: $dir"
+  (cd "$dir" && pwd -P)
+}
+
+require_command() {
+  local name=$1
+
+  command -v "$name" >/dev/null 2>&1 || die "$name is not on PATH"
+}
+
+tmux_cmd() {
+  if [[ -n $socket_name ]]; then
+    tmux -L "$socket_name" "$@"
+  else
+    tmux "$@"
+  fi
+}
+
+window_exists() {
+  local windows
+  local window
+
+  windows=$(tmux_cmd list-windows -t "$session_name" -F '#{window_name}') || return 2
+  while IFS= read -r window; do
+    [[ $window == "$name" ]] && return 0
+  done <<<"$windows"
+
+  return 1
+}
+
+ensure_no_window_collision() {
+  local status
+
+  if ((dry_run)); then
+    return
+  fi
+
+  set +e
+  window_exists
+  status=$?
+  set -e
+
+  case "$status" in
+    0) die "tmux window already exists in session $session_name: $name" ;;
+    1) return ;;
+    *) die "tmux command failed: tmux list-windows" ;;
+  esac
+}
+
+print_metadata() {
+  printf 'agent_kind: %s\n' "$agent_kind"
+  printf 'name: %s\n' "$name"
+  printf 'mode: %s\n' "$mode"
+  printf 'socket: %s\n' "$socket_name"
+  printf 'session: %s\n' "$session_name"
+  printf 'window: %s\n' "$window_name"
+  printf 'pane: %s\n' "$pane_id"
+  printf 'cwd: %s\n' "$cwd"
+  if [[ $mode == shared ]]; then
+    printf 'talk_target: %s\n' "$pane_id"
+  fi
+  if ((dry_run)); then
+    printf 'dry_run: true\n'
+    printf 'command: %s\n' "$codex_command"
+  fi
+}
+
+agent_kind=''
+name=''
+cwd_input=$PWD
+mode=shared
+layout=window
+socket_name=''
+session_name=''
+dry_run=0
+prompt=''
+prompt_parts=()
+
+if (($# == 0)); then
+  usage >&2
+  exit 1
+fi
+
+case "$1" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  -*)
+    die 'agent kind is required'
+    ;;
+  *)
+    agent_kind=$1
+    shift
+    ;;
+esac
+
+while (($# > 0)); do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --name)
+      (($# >= 2)) || die 'argument --name requires a value'
+      shift
+      name=$1
+      ;;
+    --cd)
+      (($# >= 2)) || die 'argument --cd requires a value'
+      shift
+      cwd_input=$1
+      ;;
+    --mode)
+      (($# >= 2)) || die 'argument --mode requires a value'
+      shift
+      mode=$1
+      ;;
+    --layout)
+      (($# >= 2)) || die 'argument --layout requires a value'
+      shift
+      layout=$1
+      ;;
+    --socket)
+      (($# >= 2)) || die 'argument --socket requires a value'
+      shift
+      socket_name=$1
+      ;;
+    --session)
+      (($# >= 2)) || die 'argument --session requires a value'
+      shift
+      session_name=$1
+      ;;
+    --dry-run)
+      dry_run=1
+      ;;
+    --)
+      shift
+      prompt_parts=("$@")
+      break
+      ;;
+    *)
+      die "unrecognized argument: $1"
+      ;;
+  esac
+  shift
+done
+
+if ((${#prompt_parts[@]} > 0)); then
+  join_prompt "${prompt_parts[@]}"
+else
+  prompt=''
+fi
+
+[[ $agent_kind == codex ]] || die "unsupported agent kind: $agent_kind"
+case "$mode" in
+  shared|isolated) ;;
+  *) die "unsupported mode: $mode" ;;
+esac
+case "$layout" in
+  window|pane) ;;
+  *) die "unsupported layout: $layout" ;;
+esac
+
+cwd=$(resolve_cwd "$cwd_input")
+require_command tmux
+require_command codex
+
+if [[ -z $name ]]; then
+  name="codex-$(date '+%Y%m%d-%H%M%S')"
+fi
+
+if [[ $mode == isolated ]]; then
+  [[ $layout == window ]] || die 'isolated mode only supports --layout window'
+  [[ -n $prompt ]] || die 'isolated mode requires an initial prompt'
+  if [[ -z $socket_name ]]; then
+    socket_name="summon-$name"
+  fi
+  if [[ -z $session_name ]]; then
+    session_name=$name
+  fi
+else
+  socket_name=''
+  if [[ -z $session_name ]]; then
+    if ((dry_run)); then
+      session_name=${SUMMON_DRY_RUN_SESSION:-dry-run}
+    else
+      [[ -n ${TMUX:-} ]] || die 'shared mode requires running inside tmux'
+      session_name=$(tmux display-message -p '#S') || die 'tmux command failed: tmux display-message'
+    fi
+  fi
+fi
+
+codex_args=(codex --cd "$cwd")
+if [[ -n $prompt ]]; then
+  codex_args+=("$prompt")
+fi
+codex_command=$(shell_join "${codex_args[@]}")
+
+pane_id=''
+window_name=$name
+
+if ((dry_run)); then
+  pane_id='%dry-run'
+  print_metadata
+  exit 0
+fi
+
+if [[ $mode == shared ]]; then
+  [[ -n ${TMUX:-} ]] || die 'shared mode requires running inside tmux'
+  ensure_no_window_collision
+  if [[ $layout == window ]]; then
+    pane_id=$(tmux new-window -P -F '#{pane_id}' -t "$session_name" -n "$name" -c "$cwd" "$codex_command") \
+      || die 'tmux command failed: tmux new-window'
+    window_name=$name
+  else
+    window_name=$(tmux display-message -p '#W') || die 'tmux command failed: tmux display-message'
+    pane_id=$(tmux split-window -P -F '#{pane_id}' -c "$cwd" "$codex_command") \
+      || die 'tmux command failed: tmux split-window'
+  fi
+else
+  if tmux_cmd has-session -t "$session_name" >/dev/null 2>&1; then
+    ensure_no_window_collision
+    pane_id=$(tmux_cmd new-window -P -F '#{pane_id}' -t "$session_name" -n "$name" -c "$cwd" "$codex_command") \
+      || die 'tmux command failed: tmux new-window'
+  else
+    pane_id=$(tmux_cmd new-session -d -P -F '#{pane_id}' -s "$session_name" -n "$name" -c "$cwd" "$codex_command") \
+      || die 'tmux command failed: tmux new-session'
+  fi
+  window_name=$name
+fi
+
+print_metadata
