@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+usage:
+  roster list [--all]
+  roster get [--all] <query>
+EOF
+}
+
+die() {
+  printf 'roster: %s\n' "$*" >&2
+  exit 1
+}
+
+require_tmux() {
+  command -v tmux >/dev/null 2>&1 || die 'tmux is not on PATH'
+  [[ -n ${TMUX:-} ]] || die 'must be run inside tmux to inspect the current tmux server'
+}
+
+detection_for() {
+  local window=$1
+  local command=$2
+
+  if [[ $command == codex ]]; then
+    printf 'command\n'
+  elif [[ $window == codex-* ]]; then
+    printf 'window-name\n'
+  else
+    printf 'none\n'
+  fi
+}
+
+agent_kind_for_detection() {
+  local detection=$1
+
+  if [[ $detection == none ]]; then
+    printf 'unknown\n'
+  else
+    printf 'codex\n'
+  fi
+}
+
+load_panes() {
+  local output
+  local pane session window window_id window_index pane_index cwd command detection agent_kind
+
+  if ! output=$(tmux list-panes -a -F '#{pane_id}	#{session_name}	#{window_name}	#{window_id}	#{window_index}	#{pane_index}	#{pane_current_path}	#{pane_current_command}' 2>&1); then
+    die "tmux pane listing failed: $output"
+  fi
+
+  panes=()
+  while IFS=$'\t' read -r pane session window window_id window_index pane_index cwd command; do
+    [[ -n $pane ]] || continue
+    detection=$(detection_for "$window" "$command")
+    agent_kind=$(agent_kind_for_detection "$detection")
+    panes+=("$agent_kind"$'\t'"$pane"$'\t'"$session"$'\t'"$window"$'\t'"$window_id"$'\t'"$window_index"$'\t'"$pane_index"$'\t'"$cwd"$'\t'"$command"$'\t'"$detection")
+  done <<<"$output"
+}
+
+print_record() {
+  local record=$1
+  local agent_kind pane session window window_id window_index pane_index cwd command detection
+
+  IFS=$'\t' read -r agent_kind pane session window window_id window_index pane_index cwd command detection <<<"$record"
+  printf 'agent_kind: %s\n' "$agent_kind"
+  printf 'pane: %s\n' "$pane"
+  printf 'session: %s\n' "$session"
+  printf 'window: %s\n' "$window"
+  printf 'window_id: %s\n' "$window_id"
+  printf 'window_index: %s\n' "$window_index"
+  printf 'pane_index: %s\n' "$pane_index"
+  printf 'cwd: %s\n' "$cwd"
+  printf 'command: %s\n' "$command"
+  printf 'detection: %s\n' "$detection"
+}
+
+is_visible() {
+  local record=$1
+  local agent_kind pane session window window_id window_index pane_index cwd command detection
+
+  if ((include_all)); then
+    return 0
+  fi
+
+  IFS=$'\t' read -r agent_kind pane session window window_id window_index pane_index cwd command detection <<<"$record"
+  [[ $detection != none ]]
+}
+
+record_matches_query() {
+  local record=$1
+  local query=$2
+  local agent_kind pane session window window_id window_index pane_index cwd command detection
+
+  IFS=$'\t' read -r agent_kind pane session window window_id window_index pane_index cwd command detection <<<"$record"
+
+  [[ $query == "$pane" ]] && return 0
+  [[ $query == "$session" ]] && return 0
+  [[ $query == "$window" ]] && return 0
+  [[ $query == "$window_id" ]] && return 0
+  [[ $query == "$window_index" ]] && return 0
+  [[ $query == "$pane_index" ]] && return 0
+  [[ $query == "$session:$window_index.$pane_index" ]] && return 0
+  [[ $query == "$session:$window.$pane_index" ]] && return 0
+  [[ $query == "$window_index.$pane_index" ]] && return 0
+  [[ $query == "$window.$pane_index" ]] && return 0
+  [[ $query == "$cwd" ]] && return 0
+  [[ $query == "$command" ]] && return 0
+
+  return 1
+}
+
+print_candidate_table() {
+  local record
+  local agent_kind pane session window window_id window_index pane_index cwd command detection
+
+  printf 'pane\tsession\twindow_index\tpane_index\twindow\tcwd\tcommand\tdetection\n' >&2
+  for record in "${matches[@]}"; do
+    IFS=$'\t' read -r agent_kind pane session window window_id window_index pane_index cwd command detection <<<"$record"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$pane" "$session" "$window_index" "$pane_index" "$window" "$cwd" "$command" "$detection" >&2
+  done
+}
+
+cmd=${1:-}
+include_all=0
+query=''
+panes=()
+matches=()
+
+case "$cmd" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  list|get)
+    shift
+    ;;
+  '')
+    printf 'roster: missing command\n' >&2
+    usage >&2
+    exit 1
+    ;;
+  *)
+    die "unknown command: $cmd"
+    ;;
+esac
+
+if (($# > 0)) && [[ $1 == --all ]]; then
+  include_all=1
+  shift
+fi
+
+case "$cmd" in
+  list)
+    (($# == 0)) || die "unexpected argument for list: $1"
+    ;;
+  get)
+    (($# >= 1)) || die 'get requires a query'
+    query=$1
+    shift
+    (($# == 0)) || die "unexpected argument for get: $1"
+    ;;
+esac
+
+require_tmux
+load_panes
+
+case "$cmd" in
+  list)
+    first=1
+    for record in "${panes[@]}"; do
+      is_visible "$record" || continue
+      if ((first)); then
+        first=0
+      else
+        printf '\n'
+      fi
+      print_record "$record"
+    done
+    ;;
+  get)
+    for record in "${panes[@]}"; do
+      is_visible "$record" || continue
+      if record_matches_query "$record" "$query"; then
+        matches+=("$record")
+      fi
+    done
+
+    case "${#matches[@]}" in
+      0)
+        die "no matching panes for query: $query"
+        ;;
+      1)
+        print_record "${matches[0]}"
+        ;;
+      *)
+        printf 'roster: multiple matching panes for query: %s; choose a more precise query, preferably a pane id\n' "$query" >&2
+        print_candidate_table
+        exit 1
+        ;;
+    esac
+    ;;
+esac
