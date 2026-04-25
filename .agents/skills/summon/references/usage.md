@@ -40,3 +40,19 @@ Print the metadata shape and intended Codex command without creating tmux window
 ```bash
 .agents/skills/summon/scripts/summon codex --dry-run -- "hello"
 ```
+
+## New Conversation On Existing Agent
+
+Send `/new` to an existing Codex pane in the current tmux socket:
+
+```bash
+.agents/skills/summon/scripts/summon new --to %42
+```
+
+## Dismiss Existing Agent
+
+Send `/exit` to an existing Codex pane in the current tmux socket:
+
+```bash
+.agents/skills/summon/scripts/summon dismiss --to %42
+```

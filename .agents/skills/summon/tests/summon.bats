@@ -16,6 +16,7 @@ setup() {
   link_system_command mkdir
   link_system_command pwd
   link_system_command rm
+  link_system_command sleep
 
   create_codex_stub
   create_tmux_stub
@@ -94,6 +95,14 @@ case "$cmd" in
     ;;
   select-pane)
     ;;
+  set-buffer)
+    ;;
+  paste-buffer)
+    ;;
+  delete-buffer)
+    ;;
+  send-keys)
+    ;;
   has-session)
     exit "${TMUX_HAS_SESSION_STATUS:-1}"
     ;;
@@ -147,6 +156,75 @@ assert_contains() {
   assert_contains "$output" 'talk_target: %dry-run'
   assert_contains "$output" 'dry_run: true'
   assert_contains "$output" "command: codex --cd $PWD hello"
+}
+
+@test "new dry-run prints control metadata without requiring tmux" {
+  rm -f "$STUB_BIN_DIR/tmux"
+
+  run "$SCRIPT_PATH" new --to %42 --dry-run
+
+  assert_success
+  assert_contains "$output" 'action: new'
+  assert_contains "$output" 'target: %42'
+  assert_contains "$output" 'command: /new'
+  assert_contains "$output" 'dry_run: true'
+}
+
+@test "dismiss dry-run prints exit command" {
+  run "$SCRIPT_PATH" dismiss --to %42 --dry-run
+
+  assert_success
+  assert_contains "$output" 'action: dismiss'
+  assert_contains "$output" 'target: %42'
+  assert_contains "$output" 'command: /exit'
+  assert_contains "$output" 'dry_run: true'
+}
+
+@test "new sends slash command through a tmux buffer" {
+  run "$SCRIPT_PATH" new --to %42
+
+  assert_success
+  assert_contains "$output" 'action: new'
+  assert_contains "$output" 'target: %42'
+  assert_contains "$output" 'command: /new'
+  assert_contains "$(cat "$TMUX_LOG")" 'cmd=set-buffer'
+  assert_contains "$(cat "$TMUX_LOG")" 'arg=/new'
+  assert_contains "$(cat "$TMUX_LOG")" 'cmd=paste-buffer'
+  assert_contains "$(cat "$TMUX_LOG")" 'arg=-t arg=%42'
+  assert_contains "$(cat "$TMUX_LOG")" 'cmd=send-keys arg=-t arg=%42 arg=C-m'
+}
+
+@test "dismiss sends exit command through a tmux buffer" {
+  run "$SCRIPT_PATH" dismiss --to %42
+
+  assert_success
+  assert_contains "$output" 'action: dismiss'
+  assert_contains "$output" 'command: /exit'
+  assert_contains "$(cat "$TMUX_LOG")" 'cmd=set-buffer'
+  assert_contains "$(cat "$TMUX_LOG")" 'arg=/exit'
+  assert_contains "$(cat "$TMUX_LOG")" 'cmd=paste-buffer'
+  assert_contains "$(cat "$TMUX_LOG")" 'cmd=send-keys arg=-t arg=%42 arg=C-m'
+}
+
+@test "control action requires a target" {
+  run "$SCRIPT_PATH" new --dry-run
+
+  assert_failure
+  assert_contains "$output" 'summon: summon new requires --to'
+}
+
+@test "control action rejects launch-only options" {
+  run "$SCRIPT_PATH" dismiss --to %42 --mode isolated --dry-run
+
+  assert_failure
+  assert_contains "$output" 'summon: argument --mode is only valid with summon codex'
+}
+
+@test "control action rejects prompt text" {
+  run "$SCRIPT_PATH" new --to %42 -- "hello"
+
+  assert_failure
+  assert_contains "$output" 'summon: control actions do not accept prompt text'
 }
 
 @test "shared window mode creates a tmux window and prints a talk target" {

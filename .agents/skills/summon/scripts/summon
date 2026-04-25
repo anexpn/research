@@ -7,6 +7,8 @@ usage:
   summon codex [--name <name>] [--cd <dir>] [--mode shared|isolated]
                [--layout window|pane] [--socket <socket-name>]
                [--session <session-name>] [--dry-run] [-- <initial-prompt>]
+  summon new --to <pane> [--dry-run]
+  summon dismiss --to <pane> [--dry-run]
 EOF
 }
 
@@ -55,6 +57,73 @@ require_command() {
   local name=$1
 
   command -v "$name" >/dev/null 2>&1 || die "$name is not on PATH"
+}
+
+print_control_metadata() {
+  printf 'action: %s\n' "$control_action"
+  printf 'target: %s\n' "$control_to"
+  printf 'command: %s\n' "$control_command"
+  if ((dry_run)); then
+    printf 'dry_run: true\n'
+  fi
+}
+
+send_control_to_tmux() {
+  local buffer_name
+
+  if ((dry_run)); then
+    print_control_metadata
+    return
+  fi
+
+  require_command tmux
+
+  buffer_name="summon-$$-${RANDOM:-0}"
+  tmux set-buffer -b "$buffer_name" "$control_command" || die 'tmux command failed: tmux set-buffer'
+  if ! tmux paste-buffer -d -t "$control_to" -b "$buffer_name"; then
+    tmux delete-buffer -b "$buffer_name" >/dev/null 2>&1 || true
+    die 'tmux command failed: tmux paste-buffer'
+  fi
+  sleep 0.15
+  tmux send-keys -t "$control_to" C-m || die 'tmux command failed: tmux send-keys Enter'
+
+  print_control_metadata
+}
+
+parse_control_args() {
+  while (($# > 0)); do
+    case "$1" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      --to)
+        (($# >= 2)) || die 'argument --to requires a value'
+        shift
+        control_to=$1
+        ;;
+      --dry-run)
+        dry_run=1
+        ;;
+      --name|--cd|--mode|--layout|--socket|--session)
+        die "argument $1 is only valid with summon codex"
+        ;;
+      --)
+        shift
+        (($# == 0)) || die 'control actions do not accept prompt text'
+        break
+        ;;
+      --*)
+        die "unrecognized argument: $1"
+        ;;
+      *)
+        die 'control actions do not accept prompt text'
+        ;;
+    esac
+    shift
+  done
+
+  [[ -n $control_to ]] || die "summon $control_action requires --to"
 }
 
 tmux_cmd() {
@@ -115,6 +184,9 @@ print_metadata() {
 }
 
 agent_kind=''
+control_action=''
+control_command=''
+control_to=''
 name=''
 cwd_input=$PWD
 mode=shared
@@ -133,6 +205,21 @@ fi
 case "$1" in
   -h|--help)
     usage
+    exit 0
+    ;;
+  new|dismiss)
+    control_action=$1
+    shift
+    case "$control_action" in
+      new)
+        control_command=/new
+        ;;
+      dismiss)
+        control_command=/exit
+        ;;
+    esac
+    parse_control_args "$@"
+    send_control_to_tmux
     exit 0
     ;;
   -*)
