@@ -1,0 +1,357 @@
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -u patsub_replacement 2>/dev/null || true
+
+usage() {
+  cat <<'EOF'
+usage:
+  tmuxp request --to <pane> [--name <name>] [--stdin] [--dry-run]
+                 [--requester <pane|auto>] [--request-id <id|auto>] [--] <message>
+  tmuxp reply   --to <pane> --request-id <id> [--name <name>] [--stdin] [--dry-run]
+                 [--requester <pane|auto|target>] [--replier <pane|auto>]
+                 [--reply-id <id|auto>] [--] <message>
+  tmuxp error   --to <pane> --request-id <id> [--name <name>] [--stdin] [--dry-run]
+                 [--requester <pane|auto|target>] [--replier <pane|auto>]
+                 [--reply-id <id|auto>] [--] <message>
+EOF
+}
+
+die() {
+  printf 'tmuxp: %s\n' "$*" >&2
+  exit 1
+}
+
+compact_id() {
+  local prefix=$1
+  local stamp
+  local hex
+
+  stamp=$(date '+%Y%m%d-%H%M%S')
+  hex=$(od -An -N2 -tx1 /dev/urandom 2>/dev/null | tr -d '[:space:]')
+  if [[ -z $hex ]]; then
+    hex=$$
+  fi
+
+  printf '%s-%s-%s' "$prefix" "$stamp" "$hex"
+}
+
+current_pane() {
+  local pane
+  pane=$(tmux display-message -p '#{pane_id}') || die 'tmux command failed: tmux display-message'
+  printf '%s' "$pane"
+}
+
+resolve_pane() {
+  local value=$1
+  local default=${2-}
+
+  case "$value" in
+    auto)
+      if ((dry_run)); then
+        printf 'auto'
+      else
+        current_pane
+      fi
+      ;;
+    target)
+      if (($# < 2)); then
+        die 'target default is unavailable'
+      fi
+      printf '%s' "$default"
+      ;;
+    *)
+      printf '%s' "$value"
+      ;;
+  esac
+}
+
+xml_text() {
+  local value=$1
+
+  value=${value//&/&amp;}
+  value=${value//</&lt;}
+  value=${value//>/&gt;}
+  value=${value//$'\r\n'/&#10;}
+  value=${value//$'\r'/&#10;}
+  value=${value//$'\n'/&#10;}
+
+  printf '%s' "$value"
+}
+
+tag() {
+  local name=$1
+  local value=$2
+  local body
+
+  body=$(xml_text "$value")
+  printf '<%s>%s</%s>' "$name" "$body" "$name"
+}
+
+read_stdin_message() {
+  local line
+  local status
+
+  message=''
+  while true; do
+    status=0
+    IFS= read -r line || status=$?
+    if ((status != 0)) && [[ -z $line ]]; then
+      break
+    fi
+
+    message+=$line
+    if ((status == 0)); then
+      message+=$'\n'
+    else
+      break
+    fi
+  done
+}
+
+read_message() {
+  local part
+  local first=1
+
+  if ((${#message_parts[@]} > 0)) && [[ ${message_parts[0]} == '--' ]]; then
+    message_parts=("${message_parts[@]:1}")
+  fi
+
+  if ((use_stdin)) && ((${#message_parts[@]} > 0)); then
+    die 'use either --stdin or trailing message text, not both'
+  fi
+
+  if ((use_stdin)); then
+    read_stdin_message
+  else
+    message=''
+    if ((${#message_parts[@]} > 0)); then
+      for part in "${message_parts[@]}"; do
+        if ((first)); then
+          message=$part
+          first=0
+        else
+          message+=" $part"
+        fi
+      done
+    fi
+  fi
+
+  if [[ -z $message ]]; then
+    die 'message must not be empty'
+  fi
+}
+
+append_tag() {
+  local name=$1
+  local value=$2
+
+  xml+="$(tag "$name" "$value")"
+}
+
+request_xml() {
+  local resolved_requester
+  local resolved_request_id
+
+  resolved_requester=$(resolve_pane "$requester")
+  if [[ $request_id == auto ]]; then
+    resolved_request_id=$(compact_id req)
+  else
+    resolved_request_id=$request_id
+  fi
+
+  read_message
+
+  xml=''
+  append_tag tmuxp-requester "$resolved_requester"
+  if [[ -n $name ]]; then
+    append_tag tmuxp-name "$name"
+  fi
+  append_tag tmuxp-request-id "$resolved_request_id"
+  append_tag tmuxp-request "$message"
+}
+
+response_xml() {
+  local payload_tag=$1
+  local resolved_requester
+  local resolved_replier
+  local resolved_reply_id
+
+  resolved_requester=$(resolve_pane "$requester" "$to")
+  resolved_replier=$(resolve_pane "$replier")
+  if [[ $reply_id == auto ]]; then
+    resolved_reply_id=$(compact_id rep)
+  else
+    resolved_reply_id=$reply_id
+  fi
+
+  read_message
+
+  xml=''
+  append_tag tmuxp-requester "$resolved_requester"
+  append_tag tmuxp-replier "$resolved_replier"
+  if [[ -n $name ]]; then
+    append_tag tmuxp-name "$name"
+  fi
+  append_tag tmuxp-request-id "$request_id"
+  append_tag tmuxp-reply-id "$resolved_reply_id"
+  append_tag "$payload_tag" "$message"
+}
+
+send_to_tmux() {
+  local buffer_name
+
+  if ((dry_run)); then
+    printf '%s\n' "$xml"
+    return
+  fi
+
+  buffer_name="tmuxp-$$-${RANDOM:-0}"
+  tmux set-buffer -b "$buffer_name" "$xml" || die 'tmux command failed: tmux set-buffer'
+  if ! tmux paste-buffer -d -t "$to" -b "$buffer_name"; then
+    tmux delete-buffer -b "$buffer_name" >/dev/null 2>&1 || true
+    die 'tmux command failed: tmux paste-buffer'
+  fi
+  sleep 0.15
+  tmux send-keys -t "$to" C-m || die 'tmux command failed: tmux send-keys Enter'
+}
+
+parse_args() {
+  while (($# > 0)); do
+    case "$1" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      --to)
+        if (($# < 2)); then
+          die 'argument --to requires a value'
+        fi
+        shift
+        to=$1
+        ;;
+      --name)
+        if (($# < 2)); then
+          die 'argument --name requires a value'
+        fi
+        shift
+        name=$1
+        ;;
+      --stdin)
+        use_stdin=1
+        ;;
+      --dry-run)
+        dry_run=1
+        ;;
+      --requester)
+        if (($# < 2)); then
+          die 'argument --requester requires a value'
+        fi
+        shift
+        requester=$1
+        ;;
+      --request-id)
+        if (($# < 2)); then
+          die 'argument --request-id requires a value'
+        fi
+        shift
+        request_id=$1
+        ;;
+      --replier)
+        if [[ $command_name == request ]]; then
+          die 'unrecognized argument: --replier'
+        fi
+        if (($# < 2)); then
+          die 'argument --replier requires a value'
+        fi
+        shift
+        replier=$1
+        ;;
+      --reply-id)
+        if [[ $command_name == request ]]; then
+          die 'unrecognized argument: --reply-id'
+        fi
+        if (($# < 2)); then
+          die 'argument --reply-id requires a value'
+        fi
+        shift
+        reply_id=$1
+        ;;
+      --)
+        shift
+        message_parts=("$@")
+        return
+        ;;
+      --*)
+        die "unrecognized argument: $1"
+        ;;
+      *)
+        message_parts=("$@")
+        return
+        ;;
+    esac
+    shift
+  done
+}
+
+main() {
+  if (($# == 0)); then
+    usage >&2
+    exit 2
+  fi
+
+  command_name=$1
+  shift
+
+  to=''
+  name=''
+  use_stdin=0
+  dry_run=0
+  requester=auto
+  replier=auto
+  request_id=auto
+  reply_id=auto
+  message=''
+  xml=''
+  message_parts=()
+
+  case "$command_name" in
+    request)
+      ;;
+    reply|error)
+      requester=target
+      request_id=''
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown command: $command_name"
+      ;;
+  esac
+
+  parse_args "$@"
+
+  if [[ -z $to ]]; then
+    die 'the following arguments are required: --to'
+  fi
+  if [[ $command_name != request && -z $request_id ]]; then
+    die 'the following arguments are required: --request-id'
+  fi
+
+  case "$command_name" in
+    request)
+      request_xml
+      ;;
+    reply)
+      response_xml tmuxp-reply
+      ;;
+    error)
+      response_xml tmuxp-error
+      ;;
+  esac
+
+  send_to_tmux
+}
+
+main "$@"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Talk"
+  short_description: "Coordinate agents through tmux XML messages"
+  default_prompt: "Use $talk to send a structured request to another agent through tmux."
