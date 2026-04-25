@@ -92,6 +92,8 @@ case "$cmd" in
   split-window)
     printf '%s\n' "${TMUX_SPLIT_WINDOW_PANE:-%43}"
     ;;
+  select-pane)
+    ;;
   has-session)
     exit "${TMUX_HAS_SESSION_STATUS:-1}"
     ;;
@@ -172,6 +174,20 @@ assert_contains() {
   assert_contains "$output" 'pane: %43'
   assert_contains "$output" 'talk_target: %43'
   assert_contains "$(cat "$TMUX_LOG")" 'cmd=split-window'
+  assert_contains "$(cat "$TMUX_LOG")" 'cmd=select-pane arg=-t arg=%43 arg=-T arg=codex-pane'
+}
+
+@test "shared pane mode allows a colliding window name and uses it as the pane title" {
+  printf 'codex-pane\n' >"$TMUX_WINDOWS_FILE"
+
+  run "$SCRIPT_PATH" codex --name codex-pane --layout pane -- "Review the diff"
+
+  assert_success
+  assert_contains "$output" 'mode: shared'
+  assert_contains "$output" 'window: test-window'
+  assert_contains "$output" 'pane: %43'
+  assert_contains "$(cat "$TMUX_LOG")" 'cmd=split-window'
+  assert_contains "$(cat "$TMUX_LOG")" 'cmd=select-pane arg=-t arg=%43 arg=-T arg=codex-pane'
 }
 
 @test "isolated mode uses socket and creates a session when missing" {

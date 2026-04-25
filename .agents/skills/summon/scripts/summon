@@ -257,8 +257,8 @@ fi
 
 if [[ $mode == shared ]]; then
   [[ -n ${TMUX:-} ]] || die 'shared mode requires running inside tmux'
-  ensure_no_window_collision
   if [[ $layout == window ]]; then
+    ensure_no_window_collision
     pane_id=$(tmux new-window -P -F '#{pane_id}' -t "$session_name" -n "$name" -c "$cwd" "$codex_command") \
       || die 'tmux command failed: tmux new-window'
     window_name=$name
@@ -266,6 +266,7 @@ if [[ $mode == shared ]]; then
     window_name=$(tmux display-message -p '#W') || die 'tmux command failed: tmux display-message'
     pane_id=$(tmux split-window -P -F '#{pane_id}' -c "$cwd" "$codex_command") \
       || die 'tmux command failed: tmux split-window'
+    tmux select-pane -t "$pane_id" -T "$name" || die 'tmux command failed: tmux select-pane'
   fi
 else
   if tmux_cmd has-session -t "$session_name" >/dev/null 2>&1; then
