@@ -183,6 +183,10 @@ response_xml() {
   local resolved_reply_id
   local resolved_next_request_id
 
+  if [[ $replier == target ]]; then
+    die 'replier cannot be target; use auto or an explicit pane'
+  fi
+
   resolved_requester=$(resolve_pane "$requester" "$to")
   resolved_replier=$(resolve_pane "$replier")
   if [[ $reply_id == auto ]]; then

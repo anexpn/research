@@ -1,0 +1,4 @@
+interface:
+  display_name: "Team Lead"
+  short_description: "Coordinate delegated agent work"
+  default_prompt: "Use $team-lead to coordinate teammate agents and synthesize their replies."

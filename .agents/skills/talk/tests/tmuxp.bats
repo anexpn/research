@@ -3,6 +3,7 @@
 setup() {
   SKILL_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   SCRIPT_PATH="$SKILL_ROOT/scripts/tmuxp"
+  FAKE_BIN="$BATS_TEST_TMPDIR/bin"
 }
 
 assert_success() {
@@ -27,6 +28,54 @@ assert_contains() {
     printf 'expected output to contain:\n%s\nactual:\n%s\n' "$needle" "$haystack" >&2
     return 1
   }
+}
+
+create_send_tmux_stub() {
+  mkdir -p "$FAKE_BIN"
+  cat >"$FAKE_BIN/tmux" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+cmd=${1:-}
+shift || true
+
+case "$cmd" in
+  display-message)
+    printf '%%77\n'
+    ;;
+  set-buffer)
+    content=''
+    while (($# > 0)); do
+      case "$1" in
+        -b)
+          shift
+          ;;
+        *)
+          content=$1
+          ;;
+      esac
+      shift || true
+    done
+    printf '%s' "$content" >"$TMUXP_FAKE_BUFFER"
+    ;;
+  paste-buffer)
+    printf 'paste-buffer %s\n' "$*" >>"$TMUXP_FAKE_LOG"
+    ;;
+  send-keys)
+    printf 'send-keys %s\n' "$*" >>"$TMUXP_FAKE_LOG"
+    ;;
+  delete-buffer)
+    ;;
+  *)
+    printf 'unexpected tmux command: %s\n' "$cmd" >&2
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$FAKE_BIN/tmux"
+  export PATH="$FAKE_BIN:$PATH"
+  export TMUXP_FAKE_BUFFER="$BATS_TEST_TMPDIR/buffer"
+  export TMUXP_FAKE_LOG="$BATS_TEST_TMPDIR/tmux.log"
 }
 
 @test "prints help" {
@@ -122,6 +171,62 @@ assert_contains() {
 
   assert_success
   [[ "$output" == '<tmuxp-requester>%12</tmuxp-requester><tmuxp-replier>%15</tmuxp-replier><tmuxp-request-id>req-test</tmuxp-request-id><tmuxp-reply-id>rep-test</tmuxp-reply-id><tmuxp-error>Cannot inspect the target pane.</tmuxp-error><tmuxp-next-request-id>req-next</tmuxp-next-request-id><tmuxp-next-request>Send me the failing command.</tmuxp-next-request>' ]]
+}
+
+@test "reply live send resolves auto replier to current pane" {
+  create_send_tmux_stub
+
+  run "$SCRIPT_PATH" reply \
+    --to %12 \
+    --request-id req-test \
+    --reply-id rep-test \
+    -- "Done"
+
+  assert_success
+  xml="$(<"$TMUXP_FAKE_BUFFER")"
+  [[ "$xml" == '<tmuxp-requester>%12</tmuxp-requester><tmuxp-replier>%77</tmuxp-replier><tmuxp-request-id>req-test</tmuxp-request-id><tmuxp-reply-id>rep-test</tmuxp-reply-id><tmuxp-reply>Done</tmuxp-reply>' ]]
+  assert_contains "$(<"$TMUXP_FAKE_LOG")" 'send-keys -t %12 C-m'
+}
+
+@test "error live send resolves auto replier to current pane" {
+  create_send_tmux_stub
+
+  run "$SCRIPT_PATH" error \
+    --to %12 \
+    --request-id req-test \
+    --reply-id rep-test \
+    -- "Blocked"
+
+  assert_success
+  xml="$(<"$TMUXP_FAKE_BUFFER")"
+  [[ "$xml" == '<tmuxp-requester>%12</tmuxp-requester><tmuxp-replier>%77</tmuxp-replier><tmuxp-request-id>req-test</tmuxp-request-id><tmuxp-reply-id>rep-test</tmuxp-reply-id><tmuxp-error>Blocked</tmuxp-error>' ]]
+}
+
+@test "explicit replier is preserved during live send" {
+  create_send_tmux_stub
+
+  run "$SCRIPT_PATH" reply \
+    --to %12 \
+    --request-id req-test \
+    --reply-id rep-test \
+    --replier %15 \
+    -- "Done"
+
+  assert_success
+  assert_contains "$(<"$TMUXP_FAKE_BUFFER")" '<tmuxp-replier>%15</tmuxp-replier>'
+}
+
+@test "reply rejects requester target sentinel as replier" {
+  run "$SCRIPT_PATH" reply \
+    --dry-run \
+    --to %12 \
+    --request-id req-test \
+    --reply-id rep-test \
+    --replier target \
+    -- "Done"
+
+  assert_failure
+  assert_contains "$output" 'tmuxp: replier cannot be target; use auto or an explicit pane'
 }
 
 @test "dry-run escapes XML metacharacters in payloads" {

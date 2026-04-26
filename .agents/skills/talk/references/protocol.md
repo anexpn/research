@@ -51,7 +51,7 @@ Optional no-reply marker for a dialogue continuation request:
 ## Tag Semantics
 
 - `<tmuxp-requester>`: Tmux target for the pane that requested the work. For synchronized requests, this is the pane that should receive the response. For no-reply requests, it is still useful origin metadata. Use a value the receiver can pass to `tmux send-keys -t`, such as `%12`, `agent-session:1.2`, or `:1.2`. Helper dry-runs may print the placeholder `auto` when the caller does not provide an explicit requester; do not send that placeholder as a real protocol target.
-- `<tmuxp-replier>`: Tmux target for the pane that completed or refused the work. Helper dry-runs may print the placeholder `auto` when the caller does not provide an explicit replier.
+- `<tmuxp-replier>`: Tmux target for the pane that completed or refused the work. For helper replies and errors, the default `--replier auto` resolves to the current tmux pane during a real send, not to the `--to` requester pane. Helper dry-runs may print the placeholder `auto` when the caller does not provide an explicit replier.
 - `<tmuxp-name>`: Optional human-readable label for the agent that sends the current fragment. Use this for names, roles, or aliases such as `codex-main` or `reviewer`; do not put names in tmux target tags.
 - `<tmuxp-request-id>`: Request correlation id. Generate it on request. Echo it unchanged in replies and errors for synchronized requests. For no-reply requests, keep it as correlation metadata and do not reply.
 - `<tmuxp-reply-id>`: Reply correlation id. Generate it on each reply or error.
@@ -138,6 +138,8 @@ Error:
 
 Use `--dry-run` to print the XML fragment without sending it. Dry-run output keeps unresolved `auto` requester or replier pane values as the literal placeholder `auto` so XML construction can be checked without a live tmux client; pass explicit `--requester` and `--replier` values when dry-run output must be sendable as-is. Resolve helpers relative to the talk skill directory; do not assume `scripts/tmuxp` or `scripts/tmuxp-info` exists under the current working directory.
 
+For replies and errors, omit `--replier` for normal live sends so the helper records the current pane as the sender. Use an explicit `--replier <pane>` only when deliberately constructing a fragment for another pane.
+
 ## Request Construction Checklist
 
 Before sending a request:
@@ -160,7 +162,7 @@ Before sending a request:
 Before sending a reply or error:
 
 1. Include the original requester target in `<tmuxp-requester>`.
-2. Include your own replyable tmux target in `<tmuxp-replier>`.
+2. Include your own replyable tmux target in `<tmuxp-replier>`; with the helper, omit `--replier` for normal live sends so `auto` resolves to the current pane.
 3. Copy the original request id exactly.
 4. Generate a fresh reply id.
 5. Use exactly one of `<tmuxp-reply>` or `<tmuxp-error>`.

@@ -90,7 +90,7 @@ If the next request does not need a reply, add `--no-reply` to the reply or erro
 
 Do not run a bare `scripts/tmuxp` or `scripts/tmuxp-info` from the repository or shell cwd. Resolve helpers relative to this skill directory, then invoke those paths.
 
-The helper resolves the current pane for `auto` requester or replier values during real sends, generates ids when requested, escapes payloads safely into a single-line XML fragment, pastes the fragment through a temporary tmux buffer that is deleted after paste, waits briefly, and submits it with `tmux send-keys Enter`. With `--dry-run`, unresolved `auto` pane values print as the literal placeholder `auto`; pass explicit pane values when the dry-run output must be a sendable protocol fragment.
+The helper resolves `--requester auto` to the current pane for requests, and resolves `--replier auto` to the current pane for replies and errors. Reply `--to` remains the requester pane that receives the answer; it is not used as the replier. The helper generates ids when requested, escapes payloads safely into a single-line XML fragment, pastes the fragment through a temporary tmux buffer that is deleted after paste, waits briefly, and submits it with `tmux send-keys Enter`. With `--dry-run`, unresolved `auto` pane values print as the literal placeholder `auto`; pass explicit pane values when the dry-run output must be a sendable protocol fragment.
 
 The info helper prints the current pane and available panes. With a query, it prints `target: <pane-id>` only when the query resolves to exactly one pane; if the query is missing or ambiguous, choose an explicit pane id before calling `tmuxp`.
 
