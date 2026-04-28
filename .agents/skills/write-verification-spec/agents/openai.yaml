@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Verification Spec"
+  short_description: "Draft and review verification specs from behavior contracts"
+  default_prompt: "Use $write-verification-spec to draft or revise a Markdown verification spec from this behavior or design artifact, then review it point by point for completeness and effectiveness before finalizing."
