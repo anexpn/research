@@ -476,6 +476,23 @@ assert_contains() {
   assert_contains "$(cat "$AGENT_STDIN_FILE")" 'Use a release: prefix'
 }
 
+@test "optional positional partial title seeds subject completion" {
+  local repo="$TEST_ROOT/partial-title"
+  local prompt_text
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  set_agent_output $'feat: seed title completed\n\nBody line one'
+
+  run run_in_repo "$repo" 'feat: seed title' --agent codex --vcs git
+
+  assert_success
+  prompt_text="$(cat "$AGENT_STDIN_FILE")"
+  assert_contains "$prompt_text" 'Partial commit subject seed: feat: seed title'
+  assert_contains "$prompt_text" 'Complete the first line from the partial commit subject seed.'
+  [[ "$(git -C "$repo" log -1 --format=%B)" == $'feat: seed title completed\n\nBody line one' ]]
+}
+
 @test "--style prompt fails without --prompt" {
   local repo="$TEST_ROOT/prompt-style-missing"
   init_git_repo "$repo"
@@ -487,6 +504,19 @@ assert_contains() {
 
   assert_failure
   assert_contains "$output" '--style prompt requires --prompt.'
+}
+
+@test "a second positional argument fails clearly" {
+  local repo="$TEST_ROOT/partial-title-extra-positional"
+  init_git_repo "$repo"
+  printf 'change\n' >>"$repo/file.txt"
+  git -C "$repo" add file.txt
+  set_agent_output 'feat: should not commit'
+
+  run run_in_repo "$repo" 'feat: seed title' 'extra positional' --agent codex --vcs git
+
+  assert_failure
+  assert_contains "$output" 'Only one positional partial title is supported.'
 }
 
 @test "literal placeholder tokens in prompt inputs remain verbatim" {

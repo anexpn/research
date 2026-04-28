@@ -6,7 +6,7 @@ readonly HISTORY_LIMIT=12
 
 usage() {
   cat <<'EOF'
-Usage: commit.sh [options]
+Usage: commit.sh [partial_title] [options]
 
 Options:
   --agent codex|claude|cursor-agent
@@ -17,6 +17,10 @@ Options:
   --agent-arg ARG
   --verbose
   -h, --help
+
+Arguments:
+  partial_title  Optional starting text for the commit subject.
+                 The agent completes it and adds a body when warranted.
 
 Template placeholders:
   {{VCS}}
@@ -143,6 +147,30 @@ Output contract:
 - No explanation.
 - No surrounding commentary.
 EOF
+}
+
+build_user_guidance() {
+  local guidance=
+  local partial_guidance=
+
+  if [[ -n "$user_prompt" ]]; then
+    guidance=$user_prompt
+  fi
+
+  if [[ -n "$partial_title" ]]; then
+    partial_guidance=$'Partial commit subject seed: '"$partial_title"$'\nComplete the first line from the partial commit subject seed. Keep its intent, finish it if needed, and add a body when warranted by the diff.'
+    if [[ -n "$guidance" ]]; then
+      guidance+=$'\n\n'"$partial_guidance"
+    else
+      guidance=$partial_guidance
+    fi
+  fi
+
+  if [[ -z "$guidance" ]]; then
+    printf '(none)'
+  else
+    printf '%s' "$guidance"
+  fi
 }
 
 render_template() {
@@ -481,6 +509,7 @@ agent_name=
 style_mode=conventional
 template_file=
 user_prompt=
+partial_title=
 message_file=
 agent_input_mode=
 agent_command=()
@@ -527,8 +556,16 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
-    *)
+    -*)
       die "Unknown argument: $1"
+      ;;
+    *)
+      if [[ -z "$partial_title" ]]; then
+        partial_title=$1
+        shift
+      else
+        die 'Only one positional partial title is supported.'
+      fi
       ;;
   esac
 done
@@ -582,11 +619,7 @@ else
   template_contents="$(default_template)"
 fi
 
-if [[ -z "$user_prompt" ]]; then
-  user_guidance='(none)'
-else
-  user_guidance=$user_prompt
-fi
+user_guidance="$(build_user_guidance)"
 
 prompt_text="$(render_template \
   "$template_contents" \

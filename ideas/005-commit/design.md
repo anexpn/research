@@ -52,6 +52,7 @@ The initial interface should stay small:
 
 ```bash
 commit.sh \
+  [partial_title] \
   [--agent codex|claude|cursor-agent] \
   [--vcs git|jj] \
   [--style conventional|repo|prompt] \
@@ -62,6 +63,7 @@ commit.sh \
 
 Behavior notes:
 
+- `partial_title` is an optional positional argument. When present, it seeds the first line of the commit message and the agent completes it if needed.
 - `--agent` selects the built-in agent preset and overrides inference.
 - `--vcs` overrides inference.
 - `--style conventional` is the default.
@@ -141,6 +143,7 @@ Prompt inputs:
 
 - selected style mode
 - optional user guidance from `--prompt`
+- optional partial commit subject seed from the positional argument
 - the change diff
 - recent commit subjects
 
@@ -148,6 +151,7 @@ Prompt output contract:
 
 - return only the commit message
 - first line is the subject
+- when a partial subject seed is provided, complete that first line instead of replacing its intent
 - blank line plus body is allowed when useful
 - no code fences
 - no explanation
