@@ -1,126 +1,116 @@
 ---
 name: write-verification-spec
-description: Use when Human asks Codex to turn a design doc, behavior description, workflow, API contract, bug report, or existing verification draft into a Markdown verification spec with compliant Pattern, Statement, and Required evidence sections.
+description: Use when Human asks Codex to turn a design doc, behavior description, workflow, API contract, bug report, or existing verification draft into a Markdown verification spec with compliant Subject, Observation, Pattern, and Statement sections.
 ---
 
 # Write Verification Spec
 
-This skill is self-contained. Treat the embedded verification language reference below as authoritative for statement patterns, authoring rules, rejection rules, evidence vocabulary, and item shape.
+Treat the reference below as the working rules for drafting and revising verification specs.
 
-## Verification Language Reference
+## What This Skill Produces
 
-### Scope
+This skill produces a Markdown verification spec written in controlled natural language.
 
-This language is for design-time, automatable functional verification.
+Use it for functional behavior that can be checked automatically.
 
-It does not, in v1:
+Do not use it for:
 
-- cover non-automatable acceptance criteria;
-- make non-functional requirements first-class;
-- require YAML, JSON, or another authoring schema;
-- define exact compilation into any one test framework;
-- make mutation testing or coverage thresholds part of the authoring language.
+- non-automatable acceptance criteria;
+- non-functional requirements as first-class items;
+- framework-specific test plans;
+- schema design for YAML, JSON, or other machine-authoring formats;
+- coverage targets or mutation-testing policies.
 
-### Core Model
+## Core Model
 
-The unit of thought is a verification statement, not a test case and not a schema record.
+The unit of thought is a verification item, not a test case and not a schema record.
 
-The primary artifact is a Markdown verification spec written in controlled natural language. The language states what behavior must be true and what automated evidence is required before that behavior can be treated as verified.
+Each verification item has four parts:
 
-Each verification item has two parts:
-
+- `Subject`: the externally meaningful thing whose behavior is being constrained.
+- `Observation`: where that behavior is observed.
+- `Pattern`: the statement shape that best matches the obligation.
 - `Statement`: what behavior must be true.
-- `Required evidence`: what automated checking is required before the statement can be considered satisfied.
 
-Organize verification items by contract: a coherent area of externally observable behavior such as a publish lifecycle, parser contract, or selection model.
+`Subject` should name the narrowest externally meaningful thing that carries the obligation. Prefer domain subjects such as `publish lifecycle`, `lambertian material response`, `foreground silhouette anti-aliasing behavior`, or `CLI render invocation`.
 
-### Statement Patterns
+`Observation` should name the externally visible surface or measurement surface where the subject is checked. Prefer observations such as `listing responses`, `stored document status`, `stderr error text`, `output image dimensions`, or `pixel variance in the designated edge band`.
 
-- `Example`
+Organize verification items by contract: a coherent area of externally observable behavior such as a publish lifecycle, parser contract, selection model, sync protocol, or render invocation contract.
+
+## Statement Patterns
+
+Use only these three patterns:
+
+- `Scenario`
   Form: `Given <context>, when <action>, then <observable outcome>.`
   Use for concrete scenarios, regressions, and named edge cases.
-- `Rule`
-  Form: `For any <input domain>, if <precondition>, then <observable property>.`
-  Use for general correctness over a domain, named partitions, and property-style obligations.
-- `Transition`
-  Form: `From <state>, on <event>, the system moves to <state'> and <observable effects>.`
-  Use for workflows, protocols, and lifecycle behavior.
-- `Invariant`
-  Form: `After any <operation family>, <condition> always holds.`
-  Use for safety properties over sequences, not only single operations.
-- `Equivalence`
-  Form: `<process A> and <process B> are equivalent with respect to <observation>.`
-  Use for round-trips, compatibility, normalization, idempotence, and semantic preservation.
+- `Property`
+  Form: `For any <input domain or context>, if <precondition or trigger>, then <observable property>.`
+  Use for general correctness over a domain, named partitions, workflow transitions, invariants, rejection behavior, and equivalence claims.
+- `Progress`
+  Form: `From <state or trigger>, <outcome> eventually becomes true [within <bound>].`
+  Use for eventual completion, delivery, convergence, and bounded asynchronous behavior.
 
-### Deliberate Omissions
+## Pattern Boundaries
 
-- `Boundary` is not a top-level pattern. Express boundary behavior inside `Example` or `Rule`.
+- `Boundary` is not a top-level pattern. Express boundary behavior inside `Scenario` or `Property`.
+- Given-When-Then is useful only as the `Scenario` pattern. It is not the whole language.
+- Treat transition-shaped, invariant-shaped, and equivalence-shaped obligations as tighter `Property` statements.
 - `Property test`, `table test`, and `mutation test` are verifier techniques, not behavior statement primitives.
-- Given-When-Then is useful only as the `Example` pattern. It is not the whole language.
 
-### Authoring Rules
+## Authoring Rules
 
-Every verification statement must satisfy all of these rules:
+Every verification item must satisfy all of these rules:
 
-- `External`: state observable behavior, not internals. Prefer visible state, returned values, persisted outcomes, emitted responses, and externally visible errors. Avoid helper names, private data structures, mocks, call counts, and storage details that are not part of the public contract.
+- `External`: state observable behavior, not internals. Prefer visible state, returned values, persisted outcomes, emitted responses, externally visible errors, output artifacts, and named observation regions. Avoid helper names, private data structures, mocks, call counts, and storage details that are not part of the public contract.
+- `Anchored`: name the subject and observation explicitly. Avoid hidden generic subjects such as `the system`, `the feature`, or `the render` when a narrower subject exists.
 - `Singular`: state one obligation at a time. If two outcomes can fail independently, split them.
 - `Scoped`: name the relevant context, state, input domain, or operation family explicitly.
 - `Quantified`: use explicit quantification when it matters, such as `for any`, `for every`, `there exists`, `never`, `only if`, or `exactly once`.
+- `Complete`: the statement must say enough to derive the intended verification strategy. If sequence behavior, rejection behavior, equivalence, or a bound matters, say so in the statement instead of outsourcing it to a separate note. A good `Property` statement should usually be enough to derive a property test directly.
 - `Falsifiable`: a reader should be able to imagine a concrete counterexample.
 - `Implementation-agnostic`: describe the contract without depending on code structure, unless an implementation detail is itself part of the externally visible behavior.
 - `Domain-language`: prefer product or problem-domain terms over module, framework, or pattern language.
 
-Quick check for every statement:
+Quick check for every item:
 
+- what subject is being constrained?
+- where is that subject observed?
 - under what conditions?
-- over what action or input family?
+- over what action, event, state change, or input family?
 - what observable result must hold?
+- what important variation must also be true, if any, such as rejection, sequence behavior, equivalence, or bounds?
 - what would count as failure?
 
-### Rejection Rules
+## Rejection Rules
 
 Reject and rewrite:
 
 - vague claims such as `works correctly`, `handles edge cases`, or `stays in sync`;
-- statements with missing scope or missing observable outcome;
+- statements with missing subject, missing observation surface, missing scope, or missing observable outcome;
 - statements that combine multiple independently failing obligations;
 - statements framed mainly in terms of implementation details;
-- evidence requirements such as `add good tests` or `cover this well`;
-- broad claims supported only by one concrete example when the real obligation is a `Rule`, `Invariant`, or `Equivalence`.
+- `Property` statements with an implicit domain, trigger, or observable result;
+- statements that leave important variation implicit when that variation changes what must be verified, such as rejection behavior, sequence behavior, equivalence, or bounds;
+- statements that rely on a separate note to supply behavior that should have been stated as part of the obligation.
 
 Weak statements such as these are non-compliant:
 
 - `Publishing works correctly.`
 - `The parser handles edge cases.`
 - `The UI keeps state in sync.`
+- `The render looks correct.`
 
 Rewrite them into precise statements such as:
 
-- `From Draft, on Publish, the document becomes Published and appears in listing responses.`
+- `For any document in Draft, if Publish is invoked, then stored status becomes Published and listing visibility becomes true.`
+- `For any document already in Published, if Publish is invoked, then the invocation is rejected and stored status remains Published.`
 - `For any valid token stream, parsing consumes the entire stream or reports the first unconsumed position.`
-- `After removing a selected item, the visible selection moves to the next visible item, or becomes empty if none remain.`
+- `For any selected-item removal from a non-empty visible selection, the visible selection moves to the next visible item, or becomes empty if none remain.`
+- `Given the canonical spheres scene, when rendered at 1 sample per pixel and at N samples per pixel, the higher-sample render has lower variance in the designated silhouette edge band.`
 
-### Evidence Language
-
-Use a controlled evidence vocabulary that names coverage shape rather than a test framework:
-
-- `Concrete example`: require one or more explicit examples.
-- `Input family coverage`: require generated or enumerated checks over a named domain or partition.
-- `State transition coverage`: require all named transitions, or all outgoing transitions from a named state.
-- `Sequence coverage`: require checks over operation sequences, not only single operations.
-- `Equivalence coverage`: require two processes to match on a named observation across a domain.
-- `Rejection coverage`: require invalid inputs or forbidden operations to fail in the specified observable way.
-- `Counterexample search`: require generated search for violating cases over a named domain.
-
-### Evidence Rules
-
-- Evidence should strengthen belief in the statement, not restate it in weaker form.
-- Evidence should name a coverage shape, not a test framework.
-- Evidence should focus on automatable proof.
-- Evidence strength should match claim strength.
-- One happy-path example is normally insufficient for `Rule`, `Invariant`, and `Equivalence` unless the claim is explicitly narrow.
-
-### Authoring Form
+## Item Shape
 
 Each contract should contain one or more verification items with this shape:
 
@@ -129,20 +119,22 @@ Each contract should contain one or more verification items with this shape:
 
 ### <short item name>
 
+Subject
+<externally meaningful subject>
+
+Observation
+<observation surface>
+
 Pattern
-<Example | Rule | Transition | Invariant | Equivalence>
+<Scenario | Property | Progress>
 
 Statement
 <controlled natural-language verification statement>
-
-Required evidence
-- <controlled evidence requirement>
-- <controlled evidence requirement>
 ```
 
 Stable identifiers may be added when helpful, but they are optional. Headings should remain readable as normal language.
 
-### Example Spec
+## Example Spec
 
 ```md
 # Document Publish Verification Spec
@@ -153,97 +145,117 @@ This spec covers the functional correctness of publishing a document.
 ## Contract: Publish lifecycle
 
 ### Publish changes status and visibility
+Subject
+Document publish lifecycle
+
+Observation
+Stored document status and listing responses
+
 Pattern
-Transition
+Property
 
 Statement
-From Draft, on Publish, the document moves to Published and becomes visible in listing responses.
+For any document in Draft, if Publish is invoked, then stored status becomes Published and listing visibility becomes true.
 
-Required evidence
-- State transition coverage for every outgoing event from Draft.
-- Rejection coverage for Publish from any non-publishable state.
-- Concrete example showing that a published document appears in listing responses.
+### Repeated publish is rejected
+Subject
+Document publish command acceptance
+
+Observation
+Publish command result and stored document status
+
+Pattern
+Property
+
+Statement
+For any document already in Published, if Publish is invoked, then the invocation is rejected and stored status remains Published.
 
 ### Publish preserves body content
+Subject
+Published document body content
+
+Observation
+Stored document body in subsequent read responses
+
 Pattern
-Invariant
+Property
 
 Statement
-After publishing, the document body content remains unchanged.
+For any published document, after any sequence of read and list operations, the stored body content remains unchanged.
 
-Required evidence
-- Concrete example covering a representative publish flow.
-- Counterexample search over valid draft documents with varying body content.
+### Publish becomes visible within one indexing cycle
+Subject
+Published document listing visibility
 
-### Publish succeeds exactly once
+Observation
+Listing responses
+
 Pattern
-Rule
+Progress
 
 Statement
-For any draft that satisfies all publish preconditions, Publish succeeds exactly once.
-
-Required evidence
-- Input family coverage over drafts that vary each publish precondition independently.
-- Rejection coverage for a repeated Publish on the same document.
+From Published, listing visibility eventually becomes true within one indexing cycle.
 
 ### API and UI publish are equivalent
+Subject
+Publish entry-point behavior
+
+Observation
+Stored status and listing visibility
+
 Pattern
-Equivalence
+Property
 
 Statement
-Publishing a document through the API and publishing the same document through the UI are equivalent with respect to stored status and listing visibility.
-
-Required evidence
-- Equivalence coverage over representative publishable drafts.
-- Rejection coverage for a document that fails publish preconditions through both entry points.
+For any publishable draft, if the draft is published through the API and through the UI, then the stored status and listing visibility are the same.
 ```
 
 ## Workflow
 
-1. Extract externally observable behavior.
+1. Extract externally observable behavior and candidate subjects.
    Ignore implementation details unless they are themselves externally visible.
-   Ignore non-functional requirements and non-automatable acceptance criteria in v1.
+   Ignore non-functional requirements and non-automatable acceptance criteria.
    If the source mixes multiple features, split them into separate contracts.
+   For each obligation, name the narrowest externally meaningful subject and the observation surface where it is checked.
 2. Define contracts before items.
-   Group behavior by coherent external contracts such as a publish lifecycle, parser contract, selection model, or sync protocol.
+   Group behavior by coherent external contracts such as a publish lifecycle, parser contract, selection model, sync protocol, or render invocation contract.
    Name each contract in domain language.
 3. Choose the narrowest statement pattern.
-   Use `Example` for a concrete scenario, regression, or named edge case.
-   Use `Rule` for a quantified input domain or partition.
-   Use `Transition` for state, event, next-state, and observable-effect behavior.
-   Use `Invariant` for a condition that must hold after an operation family or over sequences.
-   Use `Equivalence` for round-trips, normalization, idempotence, or matching entry points.
+   Use `Scenario` for a concrete scenario, regression, or named edge case.
+   Use `Progress` for eventual completion, convergence, delivery, or bounded asynchronous behavior.
+   Use `Property` for quantified correctness claims over inputs, states, workflows, sequences, rejection behavior, or paired executions.
+   Express transition-shaped, invariant-shaped, and equivalence-shaped obligations as tightly scoped `Property` statements instead of separate patterns.
 4. Write one obligation per item.
+   Fill in `Subject`, `Observation`, `Pattern`, and `Statement`.
    Make context, action or input family, and observable outcome explicit.
    Use quantifiers when the claim is broad, such as `for any`, `never`, `only if`, or `exactly once`.
+   If sequence behavior, rejection behavior, equivalence, or a bound matters, state it directly instead of implying it.
    If two outcomes can fail independently, split them into separate items.
    Prefer domain terms over module, framework, or test-tool terms.
    Ask what concrete counterexample would falsify the statement and rewrite until the failure is obvious.
-5. Choose required evidence that matches the claim.
-   Use only the controlled evidence vocabulary from the embedded reference above.
-   Name coverage shape, not frameworks or test libraries.
-   Strengthen broad claims with input-family, transition, sequence, equivalence, rejection, or counterexample coverage as appropriate.
-   Do not support a broad `Rule`, `Invariant`, or `Equivalence` claim with only one happy-path example unless the claim is intentionally narrow.
-6. Assemble the spec in Markdown.
+5. Assemble the spec in Markdown.
    Use readable headings.
    Add `## Scope` when the boundary needs to be explicit.
-   Follow the item shape from the embedded reference above exactly.
-7. Review the written spec point by point before delivering it.
+   Follow the item shape above exactly.
+6. Review the written spec point by point before delivering it.
    Re-read every contract and every verification item in order.
-   Check `Completeness`: the source's externally observable obligations are covered or explicitly called out as assumptions or open questions; each item has `Pattern`, `Statement`, and `Required evidence`; implied rejection or edge-case obligations are not silently omitted.
-   Check `Effectiveness`: the chosen pattern matches the claim; the statement satisfies the authoring rules; the required evidence is strong enough for the claim and is not limited to a happy path when the statement is broad.
+   Check `Completeness`: the source's externally observable obligations are covered or explicitly called out as assumptions or open questions; each item has `Subject`, `Observation`, `Pattern`, and `Statement`; implied rejection or edge-case obligations are not silently omitted.
+   Check `Effectiveness`: the named subject and observation are specific enough; the chosen pattern is the narrowest fit; the statement satisfies the authoring rules; and the statement is complete enough to derive an adequate verification strategy.
    If a point fails either check, rewrite the spec inline before delivering it and mention any remaining ambiguity explicitly.
 
 ## Writing Checks
 
 - Reject vague claims such as `works correctly`, `handles edge cases`, or `stays in sync`.
-- Reject statements with missing scope, missing observable outcome, or mainly internal wording.
+- Reject items with missing subject, missing observation, missing scope, or missing observable outcome.
+- Reject hidden generic subjects when a narrower externally meaningful subject exists.
+- Reject `Property` items that should really be `Progress` or `Scenario`.
+- Reject weak `Property` items that fail to make transition-shaped, invariant-shaped, rejection-shaped, or equivalence-shaped obligations explicit in the statement.
 - Reject compound obligations that should be split.
-- Narrow the claim or strengthen the evidence when the statement is broader than the required evidence.
+- Reject items that depend on a separate note to explain the real obligation.
 - If the source artifact leaves behavior ambiguous, surface the gap as an open question or explicit assumption instead of inventing details.
 - After the draft is written, review every contract and item point by point for `Completeness` and `Effectiveness`.
 - `Completeness` asks whether the spec covers the source's externally observable obligations with compliant item shape and whether any meaningful omission is called out explicitly.
-- `Effectiveness` asks whether each item's pattern, statement, and evidence actually support verification of the claimed behavior with enough strength to catch realistic failures.
+- `Effectiveness` asks whether each item's subject, observation, pattern, and statement actually support verification of the claimed behavior with enough strength to catch realistic failures.
 
 ## Output Shape
 
@@ -253,15 +265,18 @@ Use this skeleton unless Human asked for a different surrounding format:
 ## Contract: <contract name>
 
 ### <short item name>
+
+Subject
+<externally meaningful subject>
+
+Observation
+<observation surface>
+
 Pattern
-<Example | Rule | Transition | Invariant | Equivalence>
+<Scenario | Property | Progress>
 
 Statement
 <controlled natural-language verification statement>
-
-Required evidence
-- <controlled evidence requirement>
-- <controlled evidence requirement>
 ```
 
 ## Delivery
