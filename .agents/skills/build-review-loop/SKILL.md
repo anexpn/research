@@ -35,6 +35,7 @@ Use this skill to run a two-role rotating loop with the bundled prompts, `script
   - `build-review-loop.builder.prompt.md`
   - `build-review-loop.reviewer.prompt.md`
 - Use `--max-steps 10`.
+- Let `converge.sh run` use its default run-to-completion behavior.
 - Use session storage with `converge.sh`'s default temp session dir.
 - Keep `--tmux`, `--tmux-cleanup`, `--tmux-session-name`, and `--dry-run` unset unless Human explicitly asks for them.
 - Leave Builder and Reviewer special requirements empty unless Human selects them.
@@ -105,10 +106,18 @@ Use these bundled files:
 
 If Human keeps the default and does not store prompt files, do not write prompt files. Render the same prompt content from the bundled templates in memory and pass it to `converge.sh` with repeated `-p` / `--prompt` arguments:
 
+- Present the final inline form as one copy-pasteable plain shell command string.
+- Never use heredocs, shell variables, or command substitution to carry inline prompt text.
+- Put the fully rendered prompt text directly inside repeated single-quoted `-p '...'` arguments.
+
 ```bash
 bash .agents/skills/build-review-loop/scripts/converge.sh run \
-  -p "<rendered Builder prompt text>" \
-  -p "<rendered Reviewer prompt text>"
+  -p '# Builder Prompt
+
+<rendered Builder prompt text>' \
+  -p '# Reviewer Prompt
+
+<rendered Reviewer prompt text>'
 ```
 
 ## Assemble the converge command
@@ -121,6 +130,7 @@ bash .agents/skills/build-review-loop/scripts/converge.sh run \
 - Rotate Builder then Reviewer prompt sources in order.
 - Use `-s` only when a custom session dir is enabled.
 - Use `--no-session-dir` when Human explicitly chose not to use a session directory.
+- `converge.sh run` stops on completion by default. Use `--no-run-to-completion` only when Human explicitly wants fixed-step behavior or disables session storage.
 - Use `-n` only when the step count differs from the script default or when showing the chosen explicit value helps clarity.
 - Keep tmux-related flags at defaults unless Human explicitly asked for them.
 - For risk review, resolve every selected preset to its concrete agent command before deciding whether the run is safe enough to present without caveat. Do not treat a raw `-A <preset>` token as evidence that no risky flags are present.
@@ -130,8 +140,12 @@ Default shape:
 
 ```bash
 bash .agents/skills/build-review-loop/scripts/converge.sh run \
-  -p "<rendered Builder prompt text>" \
-  -p "<rendered Reviewer prompt text>"
+  -p '# Builder Prompt
+
+<rendered Builder prompt text>' \
+  -p '# Reviewer Prompt
+
+<rendered Reviewer prompt text>'
 ```
 
 Stored-prompt shape:
@@ -140,6 +154,19 @@ Stored-prompt shape:
 bash .agents/skills/build-review-loop/scripts/converge.sh run \
   -f "<design-spec-dir>/build-review-loop.builder.prompt.md" \
   -f "<design-spec-dir>/build-review-loop.reviewer.prompt.md"
+```
+
+Fixed-step opt-out shape:
+
+```bash
+bash .agents/skills/build-review-loop/scripts/converge.sh run \
+  -p '# Builder Prompt
+
+<rendered Builder prompt text>' \
+  -p '# Reviewer Prompt
+
+<rendered Reviewer prompt text>' \
+  --no-run-to-completion
 ```
 
 If Human chose a custom session dir and it already contains `run/meta`, prefer `converge.sh resume -s "<session-dir>"` instead of starting a fresh run. Ask for a positive `--additional-steps` value only when Human wants to run more steps beyond the current end.

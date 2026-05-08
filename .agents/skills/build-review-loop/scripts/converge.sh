@@ -32,7 +32,7 @@ converge.sh - run or resume a rotating agent loop
 
 USAGE
   converge.sh run [options]
-  converge.sh resume -s <path> [-n <n>|--additional-steps <n>] [--run-to-completion] [-d]
+  converge.sh resume -s <path> [-n <n>|--additional-steps <n>] [--run-to-completion|--no-run-to-completion] [-d]
   converge.sh [options]   # shorthand for run
 
 RUN OPTIONS
@@ -51,6 +51,9 @@ RUN OPTIONAL
   -n, --max-steps     Number of loop iterations (default: 10).
       --run-to-completion
                   Stop early after 2 consecutive complete work judgements.
+                  This is the default for new runs.
+      --no-run-to-completion
+                  Use fixed-step mode instead of stopping early on completion.
   -t, --tmux          Run each step in a tmux window for live observability.
   -x, --tmux-cleanup  Auto-kill tmux session when loop exits or is interrupted.
   -T, --tmux-session-name
@@ -64,6 +67,8 @@ RESUME OPTIONS
                   Additional steps to run from the current end.
       --run-to-completion
                   Enable run-to-completion for resumed steps and reset the streak.
+      --no-run-to-completion
+                  Disable run-to-completion for resumed steps and use fixed steps.
   -d, --dry-run       Print remaining plan and exit.
 
   -h, --help      Show this help message.
@@ -71,7 +76,7 @@ RESUME OPTIONS
 EXAMPLES
   converge.sh run -A codex -p "You are builder" -f ./prompts/inspector.md -n 2
   converge.sh run -a "claude -p --permission-mode bypassPermissions" -s ./session -f ./prompts/judge.md -H
-  converge.sh run -A codex -f ./prompts/builder.md --no-session-dir
+  converge.sh run -A codex -f ./prompts/builder.md --no-session-dir --no-run-to-completion
   converge.sh resume -s ./session --additional-steps 4
 EOF
 }
@@ -671,7 +676,7 @@ fi
 
 session_dir="" max_steps=10 use_tmux=0 tmux_cleanup=0 tmux_session_name="" tmux_session_name_requested="" tmux_created=0 handoff_disabled=0
 session_dir_mode="auto"
-run_to_completion=0 completion_streak_target=2 completion_streak=0
+run_to_completion=1 run_to_completion_override="" completion_streak_target=2 completion_streak=0
 active_tmux_exit_code_file=""
 active_tmux_wait_pid=""
 tmux_wait_code=""
@@ -725,16 +730,23 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --run-to-completion)
+      run_to_completion_override="enabled"
       run_to_completion=1
       if [[ "$mode" == "resume" ]]; then
         resume_reset_completion_streak=1
       fi
       shift
       ;;
+    --no-run-to-completion)
+      run_to_completion_override="disabled"
+      run_to_completion=0
+      resume_reset_completion_streak=0
+      shift
+      ;;
     -d|--dry-run) dry_run=1; shift ;;
     -p|--prompt|-f|--prompt-file|-a|--agent-cmd|-A|--agent-preset|-t|--tmux|-x|--tmux-cleanup|-T|--tmux-session-name|-H|--no-handoff)
       if [[ "$mode" == "resume" ]]; then
-        echo "resume only accepts -s/--session-dir, -n/--additional-steps, --run-to-completion, and -d/--dry-run." >&2
+        echo "resume only accepts -s/--session-dir, -n/--additional-steps, --run-to-completion, --no-run-to-completion, and -d/--dry-run." >&2
         exit 1
       fi
       case "$1" in
@@ -826,8 +838,10 @@ else
   load_run_metadata "$meta_dir"
   last_completed_step="$(find_last_completed_step "$run_dir")"
 
-  if [[ "$resume_reset_completion_streak" -eq 1 ]]; then
+  if [[ "$run_to_completion_override" == "enabled" ]]; then
     run_to_completion=1
+  elif [[ "$run_to_completion_override" == "disabled" ]]; then
+    run_to_completion=0
   fi
   if [[ -n "$resume_additional_steps" ]]; then
     require_positive_integer "$resume_additional_steps" "--additional-steps"

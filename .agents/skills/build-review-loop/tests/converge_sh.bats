@@ -425,13 +425,56 @@ EOF
     --agent-cmd "$agent_a" \
     --agent-cmd "$agent_b" \
     --max-steps 3 \
-    --no-session-dir
+    --no-session-dir \
+    --no-run-to-completion
 
   [ "$status" -eq 0 ]
   [[ "$output" != *"session_dir="* ]]
   [[ "$output" == *"agent-a"* ]]
   [[ "$output" == *"agent-b"* ]]
   [ -z "$(find "$tmp_root" -maxdepth 1 -name 'converge-session.*' -print -quit)" ]
+}
+
+@test "run defaults to run-to-completion" {
+  session_dir="$TEST_ROOT/session"
+  sequence_file="$TEST_ROOT/judgements.txt"
+  count_file="$TEST_ROOT/count.txt"
+  agent_path="$BIN_DIR/agent"
+  printf 'complete\ncomplete\ncomplete\n' > "$sequence_file"
+  printf '0\n' > "$count_file"
+  make_sequence_completion_agent "$agent_path" "$sequence_file" "$count_file"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 5 \
+    --no-handoff
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"completion_mode=run_to_completion"* ]]
+  [[ "$output" == *"Completion confirmed at step 2 after 2 consecutive complete judgements."* ]]
+  [ -f "$session_dir/run/s002/exit_code.txt" ]
+  [ ! -e "$session_dir/run/s003/exit_code.txt" ]
+}
+
+@test "--no-run-to-completion opts a run into fixed-step mode" {
+  session_dir="$TEST_ROOT/session"
+  agent_path="$BIN_DIR/agent"
+  make_agent "$agent_path" "ok\n"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 3 \
+    --no-run-to-completion \
+    --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"completion_mode=fixed_steps"* ]]
+  [[ "$output" != *"completion_streak_target="* ]]
+  [[ "$output" != *"output_completion="* ]]
 }
 
 @test "dry run prints plan and does not execute agents" {
@@ -468,6 +511,20 @@ EOF
     --max-steps 2 \
     --no-session-dir \
     --run-to-completion
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--run-to-completion requires session storage; remove --no-session-dir."* ]]
+}
+
+@test "run-to-completion default also requires session storage" {
+  agent_path="$BIN_DIR/agent"
+  make_agent "$agent_path" "ok\n"
+
+  run bash "$SCRIPT_PATH" run \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 2 \
+    --no-session-dir
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"--run-to-completion requires session storage; remove --no-session-dir."* ]]
@@ -621,7 +678,7 @@ EOF
     --prompt-file "$PROMPT_DIR/builder.md"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"resume only accepts -s/--session-dir, -n/--additional-steps, --run-to-completion, and -d/--dry-run."* ]]
+  [[ "$output" == *"resume only accepts -s/--session-dir, -n/--additional-steps, --run-to-completion, --no-run-to-completion, and -d/--dry-run."* ]]
 }
 
 @test "resume rejects --max-steps and points to --additional-steps" {
@@ -1025,6 +1082,36 @@ EOF
   [[ "$output" == *"Completion confirmed at step 4 after 2 consecutive complete judgements."* ]]
   [ -f "$session_dir/run/s004/exit_code.txt" ]
   [ ! -e "$session_dir/run/s005/exit_code.txt" ]
+}
+
+@test "resume --no-run-to-completion disables stored completion mode" {
+  session_dir="$TEST_ROOT/session"
+  sequence_file="$TEST_ROOT/judgements.txt"
+  count_file="$TEST_ROOT/count.txt"
+  agent_path="$BIN_DIR/agent"
+  printf 'incomplete\ncomplete\ncomplete\ncomplete\n' > "$sequence_file"
+  printf '0\n' > "$count_file"
+  make_sequence_completion_agent "$agent_path" "$sequence_file" "$count_file"
+
+  run bash "$SCRIPT_PATH" run \
+    --session-dir "$session_dir" \
+    --prompt-file "$PROMPT_DIR/builder.md" \
+    --agent-cmd "$agent_path" \
+    --max-steps 2 \
+    --no-handoff \
+    --run-to-completion
+  [ "$status" -eq 0 ]
+  [ -f "$session_dir/run/s002/exit_code.txt" ]
+
+  run bash "$SCRIPT_PATH" resume \
+    --session-dir "$session_dir" \
+    --additional-steps 3 \
+    --no-run-to-completion
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"completion_mode=fixed_steps"* ]]
+  [ -f "$session_dir/run/s005/exit_code.txt" ]
+  [ ! -e "$session_dir/run/s006/exit_code.txt" ]
 }
 
 @test "tmux mode fails clearly when tmux is unavailable" {
